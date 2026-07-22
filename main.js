@@ -161,23 +161,27 @@ ipcMain.on('toggle-always-top', (event)=> {
 
 /* --- Orb du bureau --- */
 let orbWin = null;
+function createOrbWindow(){
+  if(orbWin && !orbWin.isDestroyed()) return;
+  const disp = screen.getPrimaryDisplay();
+  const sz = 300;
+  orbWin = new BrowserWindow({
+    x:Math.round(disp.bounds.x+disp.bounds.width/2-sz/2),
+    y:Math.round(disp.bounds.y+disp.bounds.height/2-sz/2),
+    width:sz, height:sz,
+    transparent: true, frame: false, resizable: false,
+    hasShadow: false, skipTaskbar: true,
+    focusable: false, alwaysOnTop: false,
+    backgroundColor: '#00000000',
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
+  });
+  orbWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  orbWin.loadFile('orb-desktop.html');
+  orbWin.on('closed', ()=>{ orbWin = null; });
+}
 ipcMain.on('toggle-desktop-orb', (event, enable)=>{
   if(enable && !orbWin){
-    const disp = screen.getPrimaryDisplay();
-    const sz = 300;
-    orbWin = new BrowserWindow({
-      x:Math.round(disp.bounds.x+disp.bounds.width/2-sz/2),
-      y:Math.round(disp.bounds.y+disp.bounds.height/2-sz/2),
-      width:sz, height:sz,
-      transparent: true, frame: false, resizable: false,
-      hasShadow: false, skipTaskbar: true,
-      focusable: false, alwaysOnTop: false,
-      backgroundColor: '#00000000',
-      webPreferences: { nodeIntegration: true, contextIsolation: false }
-    });
-    orbWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    orbWin.loadFile('orb-desktop.html');
-    orbWin.on('closed', ()=>{ orbWin = null; });
+    createOrbWindow();
   } else if(!enable && orbWin){
     orbWin.close();
     orbWin = null;
@@ -280,6 +284,7 @@ app.whenReady().then(()=>{
   createWindow();
   createTray();
   startBrain();
+  createOrbWindow();
   globalShortcut.register('Alt+Space', ()=> setMode(mode === 'full' ? 'island' : 'full'));
 });
 
