@@ -1,0 +1,15 @@
+{
+  "name": "alex-assistant",
+  "version": "0.1.0",
+  "description": "Alex — assistant personnel de bureau (Ubuntu). Fenêtre de chat avec orb centré, se contracte en îlot flottant façon Dynamic Island.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron --no-sandbox --in-process-gpu ."
+  },
+  "dependencies": {
+    "three": "^0.165.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}

@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Réglages — Alex</title>
+<style>
+  :root{
+    --amber: #ff9d3d;
+    --amber-soft: #ffc98c;
+    --panel: rgba(18,14,10,0.92);
+    --panel-border: rgba(255,157,61,0.18);
+    --text-dim: rgba(255,246,234,0.55);
+  }
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background: radial-gradient(ellipse at 50% 30%, #140a12 0%, #07050a 60%, #030203 100%);
+    overflow:hidden;
+    font-family:'Segoe UI', system-ui, -apple-system, sans-serif;
+    color:#fff6ea;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #app{
+    width:520px; height:600px;
+    display:flex; flex-direction:column;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 18px;
+    overflow:hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  #titlebar{
+    -webkit-app-region: drag;
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    flex-shrink:0;
+  }
+  #titlebar .name{ font-size:13px; letter-spacing:2px; text-transform:uppercase; color:var(--amber-soft); opacity:.85; }
+  #closeBtn{
+    -webkit-app-region:no-drag;
+    background: rgba(255,157,61,0.08); border:1px solid rgba(255,157,61,0.3);
+    color:var(--amber-soft); width:26px; height:22px; border-radius:8px;
+    cursor:pointer; font-size:12px; display:flex; align-items:center; justify-content:center;
+  }
+  #closeBtn:hover{ background: rgba(255,157,61,0.18); }
+
+  #body{ flex:1; display:flex; overflow:hidden; }
+
+  #nav{
+    width:150px; flex-shrink:0;
+    border-right:1px solid rgba(255,255,255,0.06);
+    padding: 10px 8px;
+    display:flex; flex-direction:column; gap:2px;
+  }
+  .nav-item{
+    padding:9px 12px; border-radius:9px; font-size:13px;
+    color: var(--text-dim); cursor:pointer;
+  }
+  .nav-item:hover{ background: rgba(255,255,255,0.04); color:#fff6ea; }
+  .nav-item.active{ background: rgba(255,157,61,0.14); color: var(--amber-soft); }
+
+  #content{ flex:1; padding: 20px 24px; overflow-y:auto; }
+  .section{ display:none; }
+  .section.active{ display:block; }
+  .section h2{
+    font-size:15px; letter-spacing:1px; margin:0 0 16px;
+    color:#fff6ea;
+  }
+  .field{ margin-bottom:18px; }
+  .field label{
+    display:block; font-size:12px; color:var(--text-dim);
+    margin-bottom:6px; letter-spacing:.5px;
+  }
+  .field input[type="text"], .field textarea{
+    width:100%; background: rgba(255,255,255,0.05);
+    border:1px solid rgba(255,255,255,0.1); border-radius:10px;
+    padding:9px 12px; color:#fff6ea; font-size:13px; outline:none;
+    font-family:inherit;
+  }
+  .field textarea{ resize:none; height:64px; }
+
+  .radio-row{ display:flex; flex-direction:column; gap:8px; }
+  .radio-opt{
+    display:flex; align-items:center; gap:10px;
+    padding:10px 12px; border-radius:10px;
+    border:1px solid rgba(255,255,255,0.08);
+    cursor:pointer; font-size:13px;
+  }
+  .radio-opt:hover{ border-color: rgba(255,157,61,0.3); }
+  .radio-opt.selected{ border-color: rgba(255,157,61,0.5); background: rgba(255,157,61,0.08); }
+  .radio-opt .dot{
+    width:14px; height:14px; border-radius:50%;
+    border:1.5px solid rgba(255,157,61,0.5); flex-shrink:0;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .radio-opt.selected .dot::after{
+    content:''; width:7px; height:7px; border-radius:50%; background: var(--amber);
+  }
+  .radio-opt .lbl{ display:flex; flex-direction:column; }
+  .radio-opt .lbl .t{ font-weight:500; }
+  .radio-opt .lbl .d{ font-size:11.5px; color:var(--text-dim); margin-top:2px; }
+
+  .note{
+    font-size:12.5px; line-height:1.6; color:var(--text-dim);
+    background: rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06);
+    border-radius:10px; padding:12px 14px; margin-bottom:14px;
+  }
+  .save-btn, .reset-btn{
+    background: rgba(255,157,61,0.14); border:1px solid rgba(255,157,61,0.35);
+    color: var(--amber-soft); padding:9px 18px; border-radius:999px;
+    font-size:12.5px; cursor:pointer; letter-spacing:.5px;
+  }
+  .save-btn:hover, .reset-btn:hover{ background: rgba(255,157,61,0.24); }
+  .reset-btn{ background: rgba(255,80,80,0.08); border-color: rgba(255,80,80,0.3); color:#ffb0b0; }
+  .reset-btn:hover{ background: rgba(255,80,80,0.16); }
+  .saved-tag{ font-size:11.5px; color:var(--amber-soft); margin-left:10px; opacity:0; transition:opacity .3s; }
+  .saved-tag.show{ opacity:1; }
+
+  /* --- Apparence : grille de style --- */
+  .style-grid{
+    display:grid; grid-template-columns:repeat(3, 1fr); gap:10px;
+    margin-bottom:22px;
+  }
+  .style-card{
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 14px 8px 10px;
+    display:flex; flex-direction:column; align-items:center; gap:8px;
+    cursor:pointer; position:relative;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .style-card:hover{ border-color: rgba(255,157,61,0.3); }
+  .style-card.selected{ border-color: rgba(255,157,61,0.55); background: rgba(255,157,61,0.07); }
+  .style-card.disabled{ cursor:not-allowed; opacity:.45; }
+  .style-card.disabled:hover{ border-color: rgba(255,255,255,0.08); }
+  .style-preview{
+    width:44px; height:44px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-size:16px; font-weight:600;
+  }
+  .style-card .label{ font-size:11.5px; color:#fff6ea; text-align:center; }
+  .style-card .soon{
+    position:absolute; top:6px; right:6px;
+    font-size:8.5px; letter-spacing:.5px; text-transform:uppercase;
+    color: var(--text-dim); background: rgba(255,255,255,0.06);
+    padding:2px 5px; border-radius:5px;
+  }
+
+  .prev-hud{ background: radial-gradient(circle, #1a3a3a, #0a1515); border:1px solid #2fd8d8; box-shadow:0 0 10px rgba(47,216,216,0.4); }
+  .prev-editorial{ background:#1c1c1c; color:#ff9d3d; border:1px solid rgba(255,157,61,0.3); }
+  .prev-point{ background: radial-gradient(circle, #fff, #ccc); }
+  .prev-cursor{ background:#151515; border:1px solid rgba(255,255,255,0.1); }
+  .prev-aurora{ background: conic-gradient(from 180deg, #ff9d3d, #7c8cff, #ff9d3d); }
+  .prev-orbe{ background: radial-gradient(circle at 35% 35%, #ffdca8, #ff9d3d 70%, #7a4413); }
+
+  .row-setting{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 0; border-top:1px solid rgba(255,255,255,0.06);
+  }
+  .row-setting .t{ font-size:13px; font-weight:500; }
+  .row-setting .d{ font-size:11.5px; color:var(--text-dim); margin-top:3px; max-width:280px; }
+  .segmented{ display:flex; border:1px solid rgba(255,255,255,0.1); border-radius:8px; overflow:hidden; flex-shrink:0; }
+  .segmented button{
+    background:transparent; border:none; color:var(--text-dim);
+    padding:7px 14px; font-size:12px; cursor:pointer;
+  }
+  .segmented button.active{ background: rgba(255,157,61,0.18); color:#fff; }
+  .shortcut-pill{
+    background: rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+    border-radius:8px; padding:7px 14px; font-size:12px; color:#fff6ea;
+    flex-shrink:0;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="titlebar">
+    <span class="name">Réglages — Alex</span>
+    <button id="closeBtn">✕</button>
+  </div>
+
+  <div id="body">
+    <div id="nav">
+      <div class="nav-item active" data-section="assistant">Assistant</div>
+      <div class="nav-item" data-section="appearance">Apparence</div>
+      <div class="nav-item" data-section="model">Modèle de langage</div>
+      <div class="nav-item" data-section="privacy">Confidentialité</div>
+      <div class="nav-item" data-section="about">À propos</div>
+    </div>
+
+    <div id="content">
+      <div class="section active" id="section-assistant">
+        <h2>Assistant</h2>
+        <div class="field">
+          <label>Nom</label>
+          <input type="text" id="assistantName">
+        </div>
+        <div class="field">
+          <label>Message d'accueil</label>
+          <textarea id="greeting"></textarea>
+        </div>
+        <button class="save-btn" id="saveAssistant">Enregistrer</button>
+        <span class="saved-tag" id="savedAssistant">Enregistré</span>
+      </div>
+
+      <div class="section" id="section-appearance">
+        <h2>Apparence</h2>
+        <div class="style-grid" id="styleGrid">
+          <div class="style-card disabled" data-style="hud">
+            <span class="soon">Bientôt</span>
+            <div class="style-preview prev-hud"></div>
+            <span class="label">HUD Jarvis</span>
+          </div>
+          <div class="style-card disabled" data-style="editorial">
+            <span class="soon">Bientôt</span>
+            <div class="style-preview prev-editorial">A</div>
+            <span class="label">Editorial</span>
+          </div>
+          <div class="style-card disabled" data-style="point">
+            <span class="soon">Bientôt</span>
+            <div class="style-preview prev-point"></div>
+            <span class="label">Point parlant</span>
+          </div>
+          <div class="style-card disabled" data-style="cursor">
+            <span class="soon">Bientôt</span>
+            <div class="style-preview prev-cursor"></div>
+            <span class="label">Curseur de frappe</span>
+          </div>
+          <div class="style-card disabled" data-style="aurora">
+            <span class="soon">Bientôt</span>
+            <div class="style-preview prev-aurora"></div>
+            <span class="label">Orbe Aurora</span>
+          </div>
+          <div class="style-card" data-style="orbe">
+            <div class="style-preview prev-orbe"></div>
+            <span class="label">Orbe</span>
+          </div>
+        </div>
+
+        <div class="row-setting">
+          <div>
+            <div class="t">Indices d'activité</div>
+            <div class="d">Montre ce que fait l'assistant (chaque outil appelé) dans l'overlay flottant.</div>
+          </div>
+          <div class="segmented" id="activitySegment">
+            <button data-value="on">Activé</button>
+            <button data-value="off">Désactivé</button>
+          </div>
+        </div>
+
+        <div class="row-setting">
+          <div>
+            <div class="t">Raccourci d'invocation</div>
+            <div class="d">Affiche/masque Alex de n'importe où.</div>
+          </div>
+          <div class="shortcut-pill">Alt+Space</div>
+        </div>
+      </div>
+
+      <div class="section" id="section-model">
+        <h2>Modèle de langage</h2>
+        <div class="radio-row" id="brainModeOptions">
+          <div class="radio-opt" data-value="auto">
+            <div class="dot"></div>
+            <div class="lbl"><span class="t">Auto</span><span class="d">Local d'abord, bascule sur le cloud si indisponible</span></div>
+          </div>
+          <div class="radio-opt" data-value="local">
+            <div class="dot"></div>
+            <div class="lbl"><span class="t">Local uniquement</span><span class="d">Ollama — gratuit, hors-ligne, nécessite Ollama installé</span></div>
+          </div>
+          <div class="radio-opt" data-value="cloud">
+            <div class="dot"></div>
+            <div class="lbl"><span class="t">Cloud uniquement</span><span class="d">API Claude — plus puissant, nécessite ANTHROPIC_API_KEY</span></div>
+          </div>
+        </div>
+        <span class="saved-tag" id="savedModel" style="margin-left:0;margin-top:10px;display:inline-block;">Enregistré</span>
+      </div>
+
+      <div class="section" id="section-privacy">
+        <h2>Confidentialité</h2>
+        <div class="note">
+          En mode <strong>Local</strong>, rien ne quitte cette machine — tout tourne via Ollama en local.<br><br>
+          En mode <strong>Cloud</strong>, tes messages sont envoyés à l'API Anthropic (Claude) pour générer une réponse.<br><br>
+          Le mot d'activation vocal (Porcupine) traite l'audio 100% en local, en continu — aucune donnée micro n'est envoyée nulle part pour la détection du mot "Alex".
+        </div>
+      </div>
+
+      <div class="section" id="section-about">
+        <h2>À propos</h2>
+        <div class="note">
+          Alex — assistant personnel de bureau.<br>
+          Coquille : Electron. Cerveau : Python (FastAPI).<br>
+          Wake word : Picovoice Porcupine.<br><br>
+          <button class="reset-btn" id="resetBtn">Réinitialiser les réglages</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="config-preview.js"></script>
+<script>
+const ipcRenderer = (typeof require !== 'undefined') ? require('electron').ipcRenderer : { send: ()=> window.close() };
+
+const nav = document.querySelectorAll('.nav-item');
+const sections = document.querySelectorAll('.section');
+nav.forEach(item=>{
+  item.addEventListener('click', ()=>{
+    nav.forEach(n=>n.classList.remove('active'));
+    sections.forEach(s=>s.classList.remove('active'));
+    item.classList.add('active');
+    document.getElementById('section-'+item.dataset.section).classList.add('active');
+  });
+});
+
+const cfg = window.AlexConfig.read();
+
+const assistantNameEl = document.getElementById('assistantName');
+const greetingEl = document.getElementById('greeting');
+assistantNameEl.value = cfg.assistantName;
+greetingEl.value = cfg.greeting;
+
+document.getElementById('saveAssistant').addEventListener('click', ()=>{
+  window.AlexConfig.write({ assistantName: assistantNameEl.value, greeting: greetingEl.value });
+  flashSaved('savedAssistant');
+});
+
+const brainModeOptions = document.querySelectorAll('#brainModeOptions .radio-opt');
+function refreshBrainModeUI(){
+  const current = window.AlexConfig.read().brainMode;
+  brainModeOptions.forEach(opt=> opt.classList.toggle('selected', opt.dataset.value === current));
+}
+refreshBrainModeUI();
+brainModeOptions.forEach(opt=>{
+  opt.addEventListener('click', ()=>{
+    window.AlexConfig.write({ brainMode: opt.dataset.value });
+    refreshBrainModeUI();
+    flashSaved('savedModel');
+  });
+});
+
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  window.AlexConfig.write(window.AlexConfig.defaults);
+  assistantNameEl.value = window.AlexConfig.defaults.assistantName;
+  greetingEl.value = window.AlexConfig.defaults.greeting;
+  refreshBrainModeUI();
+  refreshAppearanceUI();
+});
+
+/* --- Apparence : sélection de style (seul "Orbe" est réellement implémenté) --- */
+const styleCards = document.querySelectorAll('#styleGrid .style-card');
+function refreshAppearanceUI(){
+  const current = window.AlexConfig.read().appearanceStyle || 'orbe';
+  styleCards.forEach(c=> c.classList.toggle('selected', c.dataset.style === current));
+}
+refreshAppearanceUI();
+styleCards.forEach(card=>{
+  if(card.classList.contains('disabled')) return; // pas encore implémenté
+  card.addEventListener('click', ()=>{
+    window.AlexConfig.write({ appearanceStyle: card.dataset.style });
+    refreshAppearanceUI();
+  });
+});
+
+/* --- Indices d'activité --- */
+const activityButtons = document.querySelectorAll('#activitySegment button');
+function refreshActivityUI(){
+  const enabled = window.AlexConfig.read().activityHints !== false;
+  activityButtons.forEach(b=> b.classList.toggle('active', (b.dataset.value==='on')===enabled));
+}
+refreshActivityUI();
+activityButtons.forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    window.AlexConfig.write({ activityHints: btn.dataset.value === 'on' });
+    refreshActivityUI();
+  });
+});
+
+function flashSaved(id){
+  const el = document.getElementById(id);
+  el.classList.add('show');
+  setTimeout(()=> el.classList.remove('show'), 1500);
+}
+
+document.getElementById('closeBtn').addEventListener('click', ()=> ipcRenderer.send('close-settings'));
+</script>
+</body>
+</html>

@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Réglages — Alex</title>
+<style>
+  :root{ --amber: #ff9d3d; --amber-soft: #ffc98c; --panel: #0a0808; --panel-border: rgba(255,157,61,0.18); --text-dim: rgba(255,246,234,0.55); }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; font-family:'Segoe UI',system-ui,sans-serif; color:#fff6ea; display:flex; align-items:center; justify-content:center; }
+  #app{ width:540px; height:100vh; display:flex; flex-direction:column; background:#000; border-left:1px solid var(--panel-border); border-right:1px solid var(--panel-border); overflow:hidden; }
+  #titlebar{ -webkit-app-region:drag; display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid rgba(255,255,255,0.06); flex-shrink:0; }
+  #titlebar .name{ font-size:14px; letter-spacing:2px; text-transform:uppercase; color:var(--amber-soft); opacity:.85; }
+  #closeBtn{ -webkit-app-region:no-drag; background:rgba(255,157,61,0.08); border:1px solid rgba(255,157,61,0.3); color:var(--amber-soft); width:26px; height:22px; border-radius:8px; cursor:pointer; font-size:12px; display:flex; align-items:center; justify-content:center; }
+  #closeBtn:hover{ background:rgba(255,157,61,0.18); }
+  #body{ flex:1; display:flex; overflow:hidden; }
+  #nav{ width:150px; flex-shrink:0; border-right:1px solid rgba(255,255,255,0.06); padding:10px 8px; display:flex; flex-direction:column; gap:2px; }
+  .nav-item{ padding:9px 12px; border-radius:9px; font-size:13px; color:var(--text-dim); cursor:pointer; transition:all .2s; }
+  .nav-item:hover{ background:rgba(255,255,255,0.04); color:#fff6ea; }
+  .nav-item.active{ background:rgba(255,157,61,0.14); color:var(--amber-soft); }
+  #content{ flex:1; padding:20px 24px; overflow-y:auto; }
+  .section{ display:none; animation:fadeIn .25s ease; }
+  .section.active{ display:block; }
+  @keyframes fadeIn{ from{ opacity:0; } to{ opacity:1; } }
+  .section h2{ font-size:15px; letter-spacing:1px; margin:0 0 16px; color:#fff6ea; }
+  .field{ margin-bottom:18px; }
+  .field label{ display:block; font-size:12px; color:var(--text-dim); margin-bottom:6px; letter-spacing:.5px; }
+  .field input[type="text"], .field textarea{ width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:9px 12px; color:#fff6ea; font-size:13px; outline:none; font-family:inherit; }
+  .field textarea{ resize:none; height:64px; }
+  .radio-row{ display:flex; flex-direction:column; gap:8px; }
+  .radio-opt{ display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.08); cursor:pointer; font-size:13px; transition:all .2s; }
+  .radio-opt:hover{ border-color:rgba(255,157,61,0.3); }
+  .radio-opt.selected{ border-color:rgba(255,157,61,0.5); background:rgba(255,157,61,0.08); }
+  .radio-opt .dot{ width:14px; height:14px; border-radius:50%; border:1.5px solid rgba(255,157,61,0.5); flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+  .radio-opt.selected .dot::after{ content:''; width:7px; height:7px; border-radius:50%; background:var(--amber); }
+  .radio-opt .lbl{ display:flex; flex-direction:column; }
+  .radio-opt .lbl .t{ font-weight:500; }
+  .radio-opt .lbl .d{ font-size:11.5px; color:var(--text-dim); margin-top:2px; }
+  .note{ font-size:12.5px; line-height:1.6; color:var(--text-dim); background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px 14px; margin-bottom:14px; }
+  .save-btn, .reset-btn{ background:rgba(255,157,61,0.14); border:1px solid rgba(255,157,61,0.35); color:var(--amber-soft); padding:9px 18px; border-radius:999px; font-size:12.5px; cursor:pointer; letter-spacing:.5px; transition:all .2s; }
+  .save-btn:hover, .reset-btn:hover{ background:rgba(255,157,61,0.24); }
+  .reset-btn{ background:rgba(255,80,80,0.08); border-color:rgba(255,80,80,0.3); color:#ffb0b0; }
+  .reset-btn:hover{ background:rgba(255,80,80,0.16); }
+  .saved-tag{ font-size:11.5px; color:var(--amber-soft); margin-left:10px; opacity:0; transition:opacity .3s; }
+  .saved-tag.show{ opacity:1; }
+  .shortcut-pill{ background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:8px; padding:7px 14px; font-size:12px; color:#fff6ea; flex-shrink:0; }
+  .row-setting .t{ font-size:13px; font-weight:500; }
+  .row-setting .d{ font-size:11.5px; color:var(--text-dim); margin-top:3px; max-width:280px; }
+  .segmented{ display:flex; border:1px solid rgba(255,255,255,0.1); border-radius:8px; overflow:hidden; flex-shrink:0; }
+  .segmented button{ background:transparent; border:none; color:var(--text-dim); padding:7px 14px; font-size:12px; cursor:pointer; }
+  .segmented button.active{ background:rgba(255,157,61,0.18); color:#fff; }
+  .shortcut-pill{ background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:8px; padding:7px 14px; font-size:12px; color:#fff6ea; flex-shrink:0; }
+  .toggle-row{ display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-top:1px solid rgba(255,255,255,0.06); }
+  .toggle-row .t{ font-size:13px; font-weight:500; }
+  .toggle-row .d{ font-size:11.5px; color:var(--text-dim); margin-top:2px; }
+  .toggle-switch{ position:relative; width:38px; height:22px; flex-shrink:0; }
+  .toggle-switch input{ opacity:0; width:0; height:0; }
+  .toggle-switch .slider{ position:absolute; inset:0; cursor:pointer; background:rgba(255,255,255,0.1); border-radius:22px; transition:.25s; }
+  .toggle-switch .slider::before{ content:''; position:absolute; height:16px; width:16px; left:3px; bottom:3px; background:#fff6ea; border-radius:50%; transition:.25s; }
+  .toggle-switch input:checked+.slider{ background:rgba(255,157,61,0.5); }
+  .toggle-switch input:checked+.slider::before{ transform:translateX(16px); }
+  .voice-item{ display:flex; align-items:center; gap:10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:10px 12px; cursor:pointer; transition:all .25s; }
+  .voice-item:hover{ border-color:rgba(255,157,61,0.2); background:rgba(255,157,61,0.04); }
+  .voice-item.selected{ border-color:#ff9d3d; background:rgba(255,157,61,0.08); }
+  .voice-item .v-info{ flex:1; min-width:0; }
+  .voice-item .v-name{ font-size:13px; font-weight:500; color:#ffddbb; }
+  .voice-item .v-desc{ font-size:11px; color:var(--text-dim); }
+  .voice-item .v-badge{ font-size:9px; background:rgba(255,157,61,0.12); color:#ff9d3d; padding:1px 7px; border-radius:20px; font-weight:500; }
+  .voice-test-btn{ width:30px; height:30px; border-radius:50%; flex-shrink:0; border:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.04); color:#ffddbb; font-size:13px; cursor:pointer; display:grid; place-items:center; }
+  .voice-test-btn:hover{ background:rgba(255,157,61,0.15); border-color:rgba(255,157,61,0.3); }
+  .voice-test-btn.playing{ background:rgba(255,157,61,0.2); border-color:#ff9d3d; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="titlebar">
+    <span class="name">Réglages — Alex</span>
+    <button id="closeBtn">✕</button>
+  </div>
+  <div id="body">
+    <div id="nav">
+      <div class="nav-item active" data-section="general">Général</div>
+      <div class="nav-item" data-section="assistant">Assistant</div>
+      <div class="nav-item" data-section="voice">Voix</div>
+      <div class="nav-item" data-section="model">Modèle</div>
+      <div class="nav-item" data-section="privacy">Confidentialité</div>
+      <div class="nav-item" data-section="about">À propos</div>
+    </div>
+    <div id="content">
+      <div class="section active" id="section-general">
+        <h2>Général</h2>
+        <div class="toggle-row">
+          <div><div class="t">Toujours au premier plan</div><div class="d">Alex reste visible au-dessus des autres fenêtres.</div></div>
+          <label class="toggle-switch"><input type="checkbox" id="settingTop"><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <div><div class="t">Orb du bureau</div><div class="d">Affiche l'orbe animé sur le fond d'écran.</div></div>
+          <label class="toggle-switch"><input type="checkbox" id="settingDesktopOrb"><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <div><div class="t">Réponse vocale</div><div class="d">Alex parle à voix haute.</div></div>
+          <label class="toggle-switch"><input type="checkbox" id="settingVoice"><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <div><div class="t">Micro toujours actif</div><div class="d">Écoute en continu (hors période de parole).</div></div>
+          <label class="toggle-switch"><input type="checkbox" id="settingListen"><span class="slider"></span></label>
+        </div>
+        <div class="row-setting">
+          <div><div class="t">Indices d'activité</div><div class="d">Montre ce que fait Alex.</div></div>
+          <div class="segmented" id="activitySegment">
+            <button data-value="on">Activé</button>
+            <button data-value="off">Désactivé</button>
+          </div>
+        </div>
+        <div class="row-setting">
+          <div><div class="t">Raccourci</div><div class="d">Affiche/masque Alex.</div></div>
+          <div class="shortcut-pill">Alt+Space</div>
+        </div>
+      </div>
+      <div class="section" id="section-assistant">
+        <h2>Assistant</h2>
+        <div class="field"><label>Nom</label><input type="text" id="assistantName"></div>
+        <div class="field"><label>Message d'accueil</label><textarea id="greeting"></textarea></div>
+        <button class="save-btn" id="saveAssistant">Enregistrer</button>
+        <span class="saved-tag" id="savedAssistant">Enregistré</span>
+      </div>
+      <div class="section" id="section-voice">
+        <h2>Voix</h2>
+        <div id="settingsVoiceList" style="display:flex;flex-direction:column;gap:6px;"></div>
+        <div style="margin-top:14px;font-size:12px;color:var(--text-dim);">Les voix sont générées par Edge TTS. Teste-les pour choisir ta préférée.</div>
+      </div>
+      <div class="section" id="section-model">
+        <h2>Modèle de langage</h2>
+        <div class="radio-row" id="brainModeOptions">
+          <div class="radio-opt" data-value="auto">
+            <div class="dot"></div>
+            <div class="lbl"><span class="t">Auto</span><span class="d">Local d'abord, cloud si indisponible</span></div>
+          </div>
+          <div class="radio-opt" data-value="local">
+            <div class="dot"></div>
+            <div class="lbl"><span class="t">Local uniquement</span><span class="d">Ollama — gratuit, hors-ligne</span></div>
+          </div>
+          <div class="radio-opt" data-value="cloud">
+            <div class="dot"></div>
+            <div class="lbl"><span class="t">Cloud uniquement</span><span class="d">API Claude — plus puissant</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="section" id="section-privacy">
+        <h2>Confidentialité</h2>
+        <div class="note">
+          En mode <strong>Local</strong>, rien ne quitte cette machine.<br><br>
+          En mode <strong>Cloud</strong>, les messages sont envoyés à l'API Anthropic.<br><br>
+          Le mot d'activation (Porcupine) est 100% local.
+        </div>
+      </div>
+      <div class="section" id="section-about">
+        <h2>À propos</h2>
+        <div class="note">
+          Alex — assistant personnel.<br>
+          Coquille : Electron. Cerveau : Python (FastAPI).<br>
+          Wake word : Picovoice Porcupine.<br><br>
+          <button class="reset-btn" id="resetBtn">Réinitialiser les réglages</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const config = require('./config.js');
+const ipc = require('electron').ipcRenderer;
+
+/* Navigation */
+document.querySelectorAll('.nav-item').forEach(item=>{
+  item.addEventListener('click', ()=>{
+    document.querySelectorAll('.nav-item,.section').forEach(e=>e.classList.remove('active'));
+    item.classList.add('active');
+    document.getElementById('section-'+item.dataset.section).classList.add('active');
+  });
+});
+
+const cfg = config.read();
+
+/* Assistant */
+const nameEl = document.getElementById('assistantName');
+const greetEl = document.getElementById('greeting');
+nameEl.value = cfg.assistantName;
+greetEl.value = cfg.greeting;
+document.getElementById('saveAssistant').addEventListener('click', ()=>{
+  config.write({ assistantName: nameEl.value, greeting: greetEl.value });
+  ipc.send('settings-updated', config.read());
+  flashSaved('savedAssistant');
+});
+
+/* Brain mode */
+const modeOpts = document.querySelectorAll('#brainModeOptions .radio-opt');
+function refreshBrainMode(){
+  const c = config.read().brainMode;
+  modeOpts.forEach(o=>o.classList.toggle('selected', o.dataset.value === c));
+}
+refreshBrainMode();
+modeOpts.forEach(opt=>{
+  opt.addEventListener('click', ()=>{
+    config.write({ brainMode: opt.dataset.value });
+    refreshBrainMode();
+    ipc.send('settings-updated', config.read());
+    flashSaved('savedModel');
+  });
+});
+
+/* Activity hints */
+const actBtns = document.querySelectorAll('#activitySegment button');
+function refreshActivity(){
+  const en = config.read().activityHints !== false;
+  actBtns.forEach(b=>b.classList.toggle('active', (b.dataset.value==='on')===en));
+}
+refreshActivity();
+actBtns.forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    config.write({ activityHints: btn.dataset.value === 'on' });
+    refreshActivity();
+    ipc.send('settings-updated', config.read());
+  });
+});
+
+/* Toggles */
+document.getElementById('settingTop').addEventListener('change', function(){
+  ipc.send('toggle-always-top');
+});
+document.getElementById('settingDesktopOrb').addEventListener('change', function(){
+  ipc.send('toggle-desktop-orb', this.checked);
+});
+document.getElementById('settingVoice').addEventListener('change', function(){
+  config.write({ voiceEnabled: this.checked });
+  ipc.send('settings-updated', config.read());
+});
+document.getElementById('settingListen').addEventListener('change', function(){
+  config.write({ listenAlways: this.checked });
+  ipc.send('settings-updated', config.read());
+});
+
+function flashSaved(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'), 1500);
+}
+
+/* Voice list */
+let currentVoice = config.read().currentVoice || 'denise';
+
+function escapeHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function buildVoiceList(){
+  const container = document.getElementById('settingsVoiceList');
+  fetch('http://127.0.0.1:8765/voices').then(r=> r.json()).then(data=>{
+    container.innerHTML = data.voices.map(v => `
+      <div class="voice-item ${v.id===currentVoice?'selected':''}" data-voice="${v.id}">
+        <div class="v-info">
+          <div class="v-name">${v.id==='clone'?'Alex (clone)':escapeHtml(v.name.split(' — ')[0])}</div>
+          <div class="v-desc">${v.id==='clone'?'Depuis Alex.ogg':escapeHtml(v.name.split(' — ')[1]||'')}</div>
+        </div>
+        ${v.id==='denise'?'<span class="v-badge">Défaut</span>':''}
+        ${v.id==='clone'?'<span class="v-badge">Clone</span>':''}
+        <button class="voice-test-btn" data-voice="${v.id}" title="Tester">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 3l15 9-15 9V3z" fill="currentColor"/></svg>
+        </button>
+      </div>
+    `).join('');
+    container.querySelectorAll('.voice-item').forEach(el=>{
+      el.addEventListener('click', function(e){
+        if(e.target.closest('.voice-test-btn')) return;
+        container.querySelectorAll('.voice-item').forEach(x=>x.classList.remove('selected'));
+        this.classList.add('selected');
+        currentVoice = this.dataset.voice;
+        config.write({ currentVoice });
+        ipc.send('settings-updated', config.read());
+      });
+    });
+    container.querySelectorAll('.voice-test-btn').forEach(btn=>{
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
+        const vid = this.dataset.voice;
+        const testText = vid==='clone' ? "Salut Jordy, je suis Alex, ta voix clonée." : "Bonjour Jordy, je suis ravie de te parler. Comment trouves-tu ma voix ?";
+        this.classList.add('playing');
+        fetch('http://127.0.0.1:8765/vocal', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({text: testText, voice: vid})
+        }).then(r=> r.blob()).then(blob=>{
+          const a = new Audio(URL.createObjectURL(blob));
+          a.onended = ()=> this.classList.remove('playing');
+          a.play().catch(()=> this.classList.remove('playing'));
+        }).catch(()=> this.classList.remove('playing'));
+      });
+    });
+  }).catch(()=>{
+    container.innerHTML = '<div style="color:rgba(255,246,234,0.4);font-size:13px;">Impossible de charger les voix.</div>';
+  });
+}
+
+buildVoiceList();
+
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  config.write(config.defaults);
+  nameEl.value = config.defaults.assistantName;
+  greetEl.value = config.defaults.greeting;
+  refreshBrainMode();
+  refreshStyle();
+  refreshActivity();
+  ipc.send('settings-updated', config.read());
+});
+
+document.getElementById('closeBtn').addEventListener('click', ()=> ipc.send('close-settings'));
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "brainMode": "auto",
+  "assistantName": "Alex",
+  "greeting": "Salut Jordy, ravie de te retrouver !",
+  "appearanceStyle": "orbe",
+  "activityHints": true,
+  "voiceEnabled": true,
+  "currentVoice": "sylvie",
+  "alwaysOnTop": true,
+  "desktopOrb": false,
+  "listenAlways": true
+}

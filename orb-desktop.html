@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="UTF-8"><title>Orb Bureau</title>
+<style>
+  *{ margin:0; padding:0; }
+  html,body{ width:100%; height:100%; background:transparent; overflow:hidden; }
+  body{ -webkit-app-region: drag; }
+  #stage3d{ width:100%; height:100%; pointer-events:none; }
+</style>
+</head>
+<body>
+<div id="stage3d"></div>
+<script type="module">
+import * as THREE from './node_modules/three/build/three.module.js';
+const R=55, container=document.getElementById('stage3d');
+let W=window.innerWidth, H=window.innerHeight;
+const scene=new THREE.Scene();
+const viewHalf=R*1.3;
+const camera=new THREE.OrthographicCamera(-viewHalf*(W/H),viewHalf*(W/H),viewHalf,-viewHalf,0.1,2000);
+camera.position.set(0,0,500); camera.lookAt(0,0,0);
+const renderer=new THREE.WebGLRenderer({alpha:true,antialias:true});
+renderer.setClearColor(0x000000,0);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,3));
+renderer.setSize(W,H); container.appendChild(renderer.domElement);
+window.addEventListener('resize',()=>{
+  W=window.innerWidth; H=window.innerHeight;
+  camera.left=-viewHalf*(W/H); camera.right=viewHalf*(W/H);
+  camera.top=viewHalf; camera.bottom=-viewHalf;
+  camera.updateProjectionMatrix(); renderer.setSize(W,H);
+});
+
+const STREAMS=28, POINTS_PER_STREAM=80, WINDINGS=2.4, N=STREAMS*POINTS_PER_STREAM;
+const particles=[];
+for(let s=0;s<STREAMS;s++){
+  const streamOffset=(s/STREAMS)*Math.PI*2;
+  const tilt=(s%2===0?1:-1)*0.15;
+  const isAmber=(s%3===0);
+  for(let i=0;i<POINTS_PER_STREAM;i++){
+    const t=i/(POINTS_PER_STREAM-1);
+    const phi=-Math.PI/2+t*Math.PI;
+    const theta=streamOffset+t*WINDINGS*Math.PI*2;
+    const x=Math.cos(phi)*Math.cos(theta);
+    const y=Math.sin(phi)+Math.sin(theta*0.5)*tilt*0.15;
+    const z=Math.cos(phi)*Math.sin(theta);
+    const len=Math.sqrt(x*x+y*y+z*z)||1;
+    particles.push({
+      tx:(x/len)*R, ty:(y/len)*R, tz:(z/len)*R,
+      delay:Math.random()*0.18, dur:0.35+Math.random()*0.2,
+      phase:Math.random()*Math.PI*2, speed:0.7+Math.random()*0.7,
+      isAmber: isAmber?Math.random()<0.8:Math.random()<0.3,
+      size:1.6+Math.random()*1.5, shapeSlot:Math.random(),
+      ox:0,oy:0,oz:0,vx:0,vy:0,vz:0
+    });
+  }
+}
+const posArray=new Float32Array(N*3),colorArray=new Float32Array(N*3);
+const sizeArray=new Float32Array(N),alphaArray=new Float32Array(N);
+const geometry=new THREE.BufferGeometry();
+geometry.setAttribute('position',new THREE.BufferAttribute(posArray,3));
+geometry.setAttribute('color',new THREE.BufferAttribute(colorArray,3));
+geometry.setAttribute('pSize',new THREE.BufferAttribute(sizeArray,1));
+geometry.setAttribute('pAlpha',new THREE.BufferAttribute(alphaArray,1));
+const vs='attribute float pSize;attribute float pAlpha;varying vec3 vColor;varying float vAlpha;void main(){vColor=color;vAlpha=pAlpha;vec4 mv=modelViewMatrix*vec4(position,1.0);gl_PointSize=pSize;gl_Position=projectionMatrix*mv;}';
+const fs='varying vec3 vColor;varying float vAlpha;void main(){vec2 c=gl_PointCoord-vec2(0.5);if(length(c)>0.5)discard;gl_FragColor=vec4(vColor,vAlpha);}';
+const material=new THREE.ShaderMaterial({vertexShader:vs,fragmentShader:fs,vertexColors:true,transparent:true,depthWrite:false});
+scene.add(new THREE.Points(geometry,material));
+
+const STATE_CONFIG={idle:{e:0.12,r:0.0035},listening:{e:0.14,r:0.007},thinking:{e:0.4,r:0.015},speaking:{e:0.5,r:0.0055},searching:{e:0.45,r:0.012},system_search:{e:0.35,r:0.009},system_launch:{e:0.55,r:0.018}};
+const state={current:'idle',energy:0.16,targetEnergy:0.16,rotSpeed:0.0042,targetRotSpeed:0.0042};
+
+function lerp(a,b,t){return a+(b-a)*t;}
+
+let rotY=0,rotX=0.16,time=0,startTime=null;
+function animate(ts){
+  requestAnimationFrame(animate);
+  if(startTime===null) startTime=ts;
+  const elapsed=(ts-startTime)/1000; time+=1;
+  state.energy=lerp(state.energy,state.targetEnergy,0.07);
+  state.rotSpeed=lerp(state.rotSpeed,state.targetRotSpeed,0.04);
+  rotY+=state.rotSpeed+state.energy*0.0012;
+  rotX=0.16+Math.sin(time*0.0008)*0.04;
+  const cY=Math.cos(rotY),sY=Math.sin(rotY),cX=Math.cos(rotX),sX=Math.sin(rotX);
+  for(let i=0;i<N;i++){
+    const p=particles[i];
+    const localT=Math.max(0,Math.min(1,(elapsed-p.delay)/p.dur));
+    const f=1-Math.pow(1-localT,3);
+    const pulse=(1+Math.sin(time*0.02*p.speed+p.phase)*(0.03+state.energy*0.26));
+    let x=p.tx*pulse, y=p.ty*pulse, z=p.tz*pulse;
+    let x1=x*cY-z*sY, z1=x*sY+z*cY;
+    let y1=y*cX-z1*sX, z2=y*sX+z1*cX;
+    posArray[i*3]=x1; posArray[i*3+1]=y1; posArray[i*3+2]=z2;
+    const depth=(z2/R+1)/2;
+    const twinkle=0.5+0.5*Math.sin(time*0.045*p.speed+p.phase);
+    alphaArray[i]=(0.45+depth*0.5)*(0.55+twinkle*0.45)*f;
+    sizeArray[i]=p.size*(0.85+depth*0.35)*(1+state.energy*0.3);
+    if(p.isAmber){
+      colorArray[i*3]=0.82+depth*0.18;colorArray[i*3+1]=0.47+depth*0.22;colorArray[i*3+2]=0.24+depth*0.16;
+    } else {
+      colorArray[i*3]=0.88+depth*0.12;colorArray[i*3+1]=0.80+depth*0.16;colorArray[i*3+2]=0.62+depth*0.14;
+    }
+    if(state.current==='searching'){
+      if(p.shapeSlot < 0.3){
+        const w = 0.6 + depth * 0.4;
+        colorArray[i*3]=w; colorArray[i*3+1]=w; colorArray[i*3+2]=w;
+        sizeArray[i] *= 0.55;
+        alphaArray[i] *= 0.7 + (0.5+0.5*Math.sin(time*0.045*p.speed+p.phase)) * 0.3;
+      } else {
+        colorArray[i*3]=0.85+depth*0.15; colorArray[i*3+1]=0.08+depth*0.12; colorArray[i*3+2]=0.12+depth*0.18;
+      }
+    }
+    if(state.current==='system_search'){
+      if(p.shapeSlot < 0.3){
+        const w = 0.7 + depth * 0.3;
+        colorArray[i*3]=w; colorArray[i*3+1]=w; colorArray[i*3+2]=w;
+        sizeArray[i] *= 0.5;
+        alphaArray[i] *= 0.65 + (0.5+0.5*Math.sin(time*0.045*p.speed+p.phase)) * 0.35;
+      } else {
+        colorArray[i*3]=0.55+depth*0.2; colorArray[i*3+1]=0.80+depth*0.15; colorArray[i*3+2]=0.25+depth*0.15;
+      }
+    }
+    if(state.current==='system_launch'){
+      if(p.shapeSlot < 0.3){
+        const w = 0.9 + depth * 0.1;
+        colorArray[i*3]=w; colorArray[i*3+1]=w; colorArray[i*3+2]=w;
+        sizeArray[i] *= 0.6;
+        alphaArray[i] *= 0.8 + (0.5+0.5*Math.sin(time*0.045*p.speed+p.phase)) * 0.2;
+      } else {
+        colorArray[i*3]=0.90+depth*0.10; colorArray[i*3+1]=0.60+depth*0.20; colorArray[i*3+2]=0.10+depth*0.15;
+      }
+    }
+  }
+  geometry.attributes.position.needsUpdate=true;
+  geometry.attributes.color.needsUpdate=true;
+  geometry.attributes.pSize.needsUpdate=true;
+  geometry.attributes.pAlpha.needsUpdate=true;
+  renderer.render(scene,camera);
+}
+requestAnimationFrame(animate);
+
+/* Recevoir l'état depuis la fenêtre principale */
+if(typeof require !== 'undefined'){
+  const {ipcRenderer}=require('electron');
+  ipcRenderer.on('orb-state',(event,name)=>{
+    const c=STATE_CONFIG[name];
+    if(c){state.current=name;state.targetEnergy=c.e;state.targetRotSpeed=c.r;}
+  });
+}
+</script>
+</body>
+</html>
