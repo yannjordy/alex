@@ -12,10 +12,11 @@ const { spawn } = require('child_process');
 
 const FULL_W = 420, FULL_H = 640;
 const ISLAND_W = 210, ISLAND_H = 46;
-
+const INFO_W = 340, INFO_H = 110;
 let win;
 let tray;
-let mode = 'full';       // 'full' | 'island'
+let mode = 'full';       // 'full' | 'island' | 'info'
+let prevMode = 'island';
 let animTimer = null;
 
 function computeBounds(targetMode){
@@ -26,6 +27,14 @@ function computeBounds(targetMode){
       height: ISLAND_H,
       x: Math.round(disp.workArea.x + disp.workArea.width/2 - ISLAND_W/2),
       y: disp.workArea.y + 2
+    };
+  }
+  if(targetMode === 'info'){
+    return {
+      width: INFO_W,
+      height: INFO_H,
+      x: Math.round(disp.workArea.x + disp.workArea.width/2 - INFO_W/2),
+      y: disp.workArea.y + 4
     };
   }
   return {
@@ -139,6 +148,21 @@ ipcMain.on('show-context-menu', (event)=> {
 
 ipcMain.on('keep-top', ()=> {
   if(alwaysOnTopEnabled && !win.isDestroyed()) win.setAlwaysOnTop(true, 'screen-saver');
+});
+
+/* Info expand — agrandit temporairement l'îlot pour afficher heure/date/météo */
+ipcMain.on('set-info-mode', (event, enable)=>{
+  if(win.isDestroyed()) return;
+  if(enable && mode === 'island'){
+    prevMode = mode;
+    animateTo(computeBounds('info'), 250);
+    mode = 'info';
+    win.webContents.send('mode-changed', 'info');
+  } else if(!enable && mode === 'info'){
+    animateTo(computeBounds(prevMode), 250);
+    mode = prevMode;
+    win.webContents.send('mode-changed', prevMode);
+  }
 });
 
 let prevBounds = null;

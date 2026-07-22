@@ -73,13 +73,15 @@
   /* --- Zone de chat (par-dessus l'orb) --- */
   #chatArea{
     flex:1; overflow-y:auto; padding: 10px 14px;
-    display:flex; flex-direction:column; gap:8px; justify-content:flex-end;
+    display:flex; flex-direction:column; gap:8px;
     -webkit-user-select:text; user-select:text;
     position:relative; z-index:1;
     background: transparent;
-    mask-image: linear-gradient(to bottom, transparent 0%, #000 50%);
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 50%);
+    scroll-behavior:smooth;
   }
+  #chatArea::-webkit-scrollbar{ width:4px; }
+  #chatArea::-webkit-scrollbar-track{ background:transparent; }
+  #chatArea::-webkit-scrollbar-thumb{ background:rgba(255,157,61,0.25); border-radius:2px; }
   .msg{
     max-width:40%;
     padding: 8px 14px;
@@ -99,6 +101,27 @@
     text-align:left;
     color:#fff6ea;
   }
+  .msg a{ color:#78b9ff; text-decoration:underline; }
+  .msg a:hover{ color:#a8d4ff; }
+  .msg code, .msg .inline-code{
+    background:rgba(255,255,255,0.07);
+    padding:1px 6px; border-radius:4px;
+    font-family:'Cascadia Code','Fira Code','JetBrains Mono',monospace;
+    font-size:0.85em; color:#f0c98c;
+  }
+  .msg .code-block{
+    display:block; background:rgba(0,0,0,0.35);
+    padding:10px 14px; border-radius:8px;
+    border-left:2px solid rgba(255,157,61,0.3);
+    font-family:'Cascadia Code','Fira Code','JetBrains Mono',monospace;
+    font-size:0.8em; line-height:1.5;
+    white-space:pre-wrap; color:#d4d4d4;
+    margin:6px 0;
+  }
+  .msg .hl{ color:#ffc98c; }
+  .msg .num{ color:#7fc9ff; }
+  .msg .str{ color:#a8e6a8; }
+  .msg .bold{ font-weight:900; color:#fff; }
 
   /* --- Barre de saisie --- */
   #inputBar{
@@ -208,7 +231,8 @@
   /* --- Affichage d'info sur l'îlot (heure, date, etc.) --- */
   #islandInfo{
     position:absolute; top:0; left:0; right:0; bottom:0; z-index:8;
-    display:flex; align-items:center; justify-content:center; gap:6px;
+    display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:2px;
     pointer-events:none;
     opacity:0; transition:opacity .3s ease;
   }
@@ -223,7 +247,21 @@
   #islandInfoText{
     font-size:13px; color:#ffddbb; font-weight:500;
     letter-spacing:0.3px; text-shadow:0 1px 6px rgba(0,0,0,0.5);
-    white-space:nowrap;
+    white-space:nowrap; transition: font-size .3s ease;
+  }
+  #islandInfoSub{
+    font-size:10px; color:rgba(255,221,187,0.55);
+    letter-spacing:0.5px; white-space:nowrap;
+    display:none;
+  }
+  #app.mode-info #islandInfo{
+    gap:4px;
+  }
+  #app.mode-info #islandInfoText{
+    font-size:28px; font-weight:600; color:#ffc98c;
+  }
+  #app.mode-info #islandInfoSub{
+    display:block; font-size:13px;
   }
   #app.mode-full #islandInfo{ display:none; }
 
@@ -662,6 +700,7 @@
   </div>
   <div id="islandInfo">
     <span id="islandInfoText"></span>
+    <span id="islandInfoSub"></span>
     <svg id="islandInfoIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" style="display:none">
       <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/>
       <path d="M12 8v4M12 16h0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -1232,15 +1271,21 @@ const textInput = document.getElementById('textInput');
 const sendBtn = document.getElementById('sendBtn');
 const micBtn = document.getElementById('micBtn');
 
+function isNearBottom(){
+  return chatArea.scrollHeight - chatArea.scrollTop - chatArea.clientHeight < 80;
+}
+function scrollToBottom(){
+  if(isNearBottom()) chatArea.scrollTop = chatArea.scrollHeight;
+}
+
 function sendMessage(text, from){
   if(!text.trim()) return;
   const div = document.createElement('div');
   div.className = 'msg ' + (from==='user' ? 'user' : 'alex');
   div.textContent = text;
   chatArea.appendChild(div);
-  chatArea.scrollTop = chatArea.scrollHeight;
+  scrollToBottom();
 }
-
 /* --- Widgets déclenchés par mots-clés --- */
 const WIDGET_KEYWORDS = {
   'heure': 'clock', 'temps': 'clock', 'time': 'clock', 'horloge': 'clock',
@@ -1256,7 +1301,7 @@ function widgetClock(){
   const opts = { weekday:'long', month:'long', day:'numeric' };
   w.innerHTML = `<div class="time" id="wClockTime">${now.toLocaleTimeString('fr-FR')}</div>
     <div class="date">${now.toLocaleDateString('fr-FR', opts)}</div>`;
-  chatArea.appendChild(w); chatArea.scrollTop = chatArea.scrollHeight;
+  chatArea.appendChild(w); scrollToBottom();
   const tick = ()=>{
     const t = document.getElementById('wClockTime');
     if(t){ t.textContent = new Date().toLocaleTimeString('fr-FR'); requestAnimationFrame(tick); }
@@ -1272,7 +1317,7 @@ function widgetCalendar(){
   w.innerHTML = `<div class="month">${months[now.getMonth()]} ${now.getFullYear()}</div>
     <div class="day">${now.getDate()}</div>
     <div class="weekday">${days[now.getDay()]}</div>`;
-  chatArea.appendChild(w); chatArea.scrollTop = chatArea.scrollHeight;
+  chatArea.appendChild(w); scrollToBottom();
 }
 
 function widgetWeather(){
@@ -1283,7 +1328,7 @@ function widgetWeather(){
   const temp = Math.floor(Math.random()*20)+15;
   w.innerHTML = `<span class="icon">${conditions[idx]}</span>
     <div><div class="temp">${temp}°C</div><div class="desc">${descs[idx]}</div></div>`;
-  chatArea.appendChild(w); chatArea.scrollTop = chatArea.scrollHeight;
+  chatArea.appendChild(w); scrollToBottom();
 }
 
 function widgetMusic(){
@@ -1299,7 +1344,7 @@ function widgetMusic(){
     <div class="track">${t.track}</div>
     <div class="artist">${t.artist}</div>
     <div class="bar"><div class="bar-inner"></div></div>`;
-  chatArea.appendChild(w); chatArea.scrollTop = chatArea.scrollHeight;
+  chatArea.appendChild(w); scrollToBottom();
 }
 
 function widgetTimer(){
@@ -1317,7 +1362,7 @@ function widgetTimer(){
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 4v6h6"/><path d="M3.5 15.5a9 9 0 102.5-11.5L1 10"/></svg>
       </button>
     </div>`;
-  chatArea.appendChild(w); chatArea.scrollTop = chatArea.scrollHeight;
+  chatArea.appendChild(w); scrollToBottom();
   const update = ()=>{
     const m = Math.floor(secs/60), s = secs%60;
     const d = document.getElementById('wTimerDisplay');
@@ -1417,7 +1462,7 @@ function showConfirmWidget(cid, toolName, params){
       </button>
     </div>`;
   chatArea.appendChild(w);
-  chatArea.scrollTop = chatArea.scrollHeight;
+  scrollToBottom();
   w.querySelector('.confirm-yes').onclick = async ()=>{
     w.querySelector('.confirm-yes').disabled = true;
     w.querySelector('.confirm-no').disabled = true;
@@ -1508,7 +1553,7 @@ function showProposalWidget(data){
 
   w.innerHTML = html;
   chatArea.appendChild(w);
-  chatArea.scrollTop = chatArea.scrollHeight;
+  scrollToBottom();
 
   // Handle question option clicks
   if(data.type === 'question'){
@@ -1551,7 +1596,7 @@ function showProposalWidget(data){
             msgDiv.className = 'msg alex';
             msgDiv.textContent = data.result || 'Fait ✓';
             chatArea.appendChild(msgDiv);
-            chatArea.scrollTop = chatArea.scrollHeight;
+            scrollToBottom();
             setTimeout(()=> setOrbState('idle'), 200);
           }catch(err){
             btn.innerHTML = '❌ Erreur';
@@ -1597,7 +1642,18 @@ function renderMediaContent(text){
   if(!text) return '';
   let html = escapeHtml(text);
 
-  // Image URLs
+  // Code blocks (``` ... ```) — must come before inline code
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (m, lang, code)=>{
+    return `<span class="code-block">${code.trim()}</span>`;
+  });
+
+  // Inline code (`...`)
+  html = html.replace(/`([^`]+)`/g, '<span class="inline-code">$1</span>');
+
+  // Bold (**text**)
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<span class="bold">$1</span>');
+
+  // Image URLs — must come before generic URL handling
   html = html.replace(/(https?:\/\/[^\s<]+?\.(?:jpe?g|png|gif|webp|bmp)(?:\?[^\s<]*)?)/gi, (m)=>{
     return `<div class="widget-media"><img src="${m}" loading="lazy" onclick="openMediaViewer('${escapeHtml(m)}','image')"></div>`;
   });
@@ -1618,6 +1674,12 @@ function renderMediaContent(text){
   html = html.replace(/(https?:\/\/[^\s<>]+)/g, (m)=>{
     return `<a href="${m}" target="_blank" rel="noopener">${m}</a>`;
   });
+
+  // Highlighted terms (⭐ ... ⭐) — after URLs so we don't break links
+  html = html.replace(/⭐([^⭐]+)⭐/g, '<span class="hl">$1</span>');
+
+  // Numbers — after URLs so we don't inject spans inside links
+  html = html.replace(/(^|[\s\(\)\[\]{}:;,!?\n])(\d+(?:[\.,]\d+)?)(?=[\s\(\)\[\]{}:;,!?\n]|$)/gm, '$1<span class="num">$2</span>');
 
   return html;
 }
@@ -1728,7 +1790,7 @@ async function handleAlexReply(userText){
           setOrbState('speaking');
         }
       }
-      chatArea.scrollTop = chatArea.scrollHeight;
+      scrollToBottom();
     }
     if(hasConfirm){
       msgDiv.remove();
@@ -1737,7 +1799,7 @@ async function handleAlexReply(userText){
     }
     if(!isSkill && msgDiv.textContent.trim()){
       const info = detectIslandInfo(fullReply);
-      if(info) showIslandInfo(info, 5);
+      if(info) showIslandInfo(info.text, 5, info.sub || '');
       speakText(fullReply);
     } else {
       if(!msgDiv.textContent.trim()){
@@ -1758,31 +1820,45 @@ function detectIslandInfo(text){
   const t = text.toLowerCase();
   if(/il est .* \d{1,2}h\d{2}/.test(text) || /\d{1,2}\s?h\s?\d{2}/.test(text) || /il est \d{1,2} heures?/.test(text)){
     const m = text.match(/(\d{1,2})h(\d{2})/);
-    if(m) return m[1]+':'+m[2];
+    if(m) return { text: m[1]+':'+m[2], sub: '' };
     return null;
   }
   if(/nous sommes le|aujourd'hui|c'est le/.test(t)){
     const now = new Date();
     const days = ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
     const months = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
-    return `${days[now.getDay()]} ${now.getDate()} ${months[now.getMonth()]}`;
+    return { text: `${now.getDate()} ${months[now.getMonth()]}`, sub: `${days[now.getDay()]} ${now.getFullYear()}` };
   }
   if(/\d{1,3}\s?°/.test(text) || /degrés/.test(t) || /température/.test(t)){
     const m = text.match(/(\d{1,3})\s?°/);
-    return m ? m[0] : null;
+    if(m) return { text: m[0], sub: text.includes('dehors') ? 'Actuel' : '' };
+    return null;
   }
   return null;
 }
 
-function showIslandInfo(text, seconds=5){
+function showIslandInfo(text, seconds=5, subtitle=''){
   const el = document.getElementById('islandInfo');
   const span = document.getElementById('islandInfoText');
+  const sub = document.getElementById('islandInfoSub');
   if(!el || !span) return;
   span.textContent = text;
+  if(sub) sub.textContent = subtitle;
+  if(sub) sub.style.display = subtitle ? 'block' : 'none';
   el.classList.add('active');
+
+  // En mode îlot, agrandir la fenêtre pour l'info
+  if(typeof require !== 'undefined'){
+    try{ require('electron').ipcRenderer.send('set-info-mode', true); }catch(e){}
+  }
+
   clearTimeout(el._timeout);
   el._timeout = setTimeout(()=>{
     el.classList.remove('active');
+    // Revenir à l'îlot normal
+    if(typeof require !== 'undefined'){
+      try{ require('electron').ipcRenderer.send('set-info-mode', false); }catch(e){}
+    }
   }, seconds * 1000);
 }
 
@@ -2060,8 +2136,12 @@ if(typeof require !== 'undefined'){
 
     ipcRenderer.on('mode-changed', (event, mode)=>{
       closeDash();
-      appEl.classList.remove('mode-full','mode-island');
-      appEl.classList.add(mode === 'island' ? 'mode-island' : 'mode-full');
+      appEl.classList.remove('mode-full','mode-island','mode-info');
+      if(mode === 'info'){
+        appEl.classList.add('mode-island','mode-info');
+      } else {
+        appEl.classList.add(mode === 'island' ? 'mode-island' : 'mode-full');
+      }
       setTimeout(initViz, 100);
       setTimeout(resizeRenderer, 50);
     });
