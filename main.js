@@ -188,6 +188,13 @@ ipcMain.on('toggle-desktop-orb', (event, enable)=>{
   }
 });
 
+/* L'orb signale qu'il est prêt → lui renvoyer le dernier état */
+ipcMain.on('orb-ready', ()=>{
+  if(orbWin && !orbWin.isDestroyed()){
+    orbWin.webContents.send('orb-state', _lastOrbState);
+  }
+});
+
 /* Drag de l'orb du bureau */
 ipcMain.on('orb-drag-start', ()=>{
   if(orbWin && !orbWin.isDestroyed()) orbWin.setAlwaysOnTop(true, 'screen-saver');
@@ -203,9 +210,10 @@ ipcMain.on('orb-drag-end', ()=>{
 });
 
 /* Synchroniser l'état de l'orb vers la fenêtre du bureau */
-const orbStates = ['idle','listening','thinking','speaking','searching','system_search','system_launch'];
-ipcMain.on('orb-state-changed', (event, state)=>{
-  if(orbWin && !orbWin.isDestroyed()) orbWin.webContents.send('orb-state', state);
+let _lastOrbState = {name:'idle', energy:0.12, rotSpeed:0.0035};
+ipcMain.on('orb-state-changed', (event, data)=>{
+  _lastOrbState = data;
+  if(orbWin && !orbWin.isDestroyed()) orbWin.webContents.send('orb-state', data);
 });
 
 /* --- Media viewer : repositionne la fenêtre --- */

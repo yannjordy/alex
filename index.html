@@ -873,7 +873,13 @@ function setOrbState(name){
   State.targetEnergy=STATE_CONFIG[name].baseEnergy;
   State.targetRotSpeed=STATE_CONFIG[name].rot;
   if(typeof require !== 'undefined'){
-    try{ require('electron').ipcRenderer.send('orb-state-changed', name); }catch(e){}
+    try{
+      require('electron').ipcRenderer.send('orb-state-changed', {
+        name: name,
+        energy: STATE_CONFIG[name].baseEnergy,
+        rotSpeed: STATE_CONFIG[name].rot
+      });
+    }catch(e){}
   }
 }
 

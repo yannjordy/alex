@@ -98,40 +98,48 @@ function animate(ts){
     const twinkle=0.5+0.5*Math.sin(time*0.045*p.speed+p.phase);
     alphaArray[i]=(0.45+depth*0.5)*(0.55+twinkle*0.45)*f;
     sizeArray[i]=p.size*(0.85+depth*0.35)*(1+state.energy*0.3);
-    if(p.isAmber){
-      colorArray[i*3]=0.82+depth*0.18;colorArray[i*3+1]=0.47+depth*0.22;colorArray[i*3+2]=0.24+depth*0.16;
-    } else {
-      colorArray[i*3]=0.88+depth*0.12;colorArray[i*3+1]=0.80+depth*0.16;colorArray[i*3+2]=0.62+depth*0.14;
-    }
-    if(state.current==='searching'){
+    if(state.current==='speaking'){
+      colorArray[i*3]=0.95+depth*0.05;colorArray[i*3+1]=0.60+depth*0.15;colorArray[i*3+2]=0.15+depth*0.10;
+      sizeArray[i]*=1.0+state.energy*0.5;
+      alphaArray[i]*=1.0+state.energy*0.3;
+    } else if(state.current==='listening'){
+      colorArray[i*3]=0.15+depth*0.15;colorArray[i*3+1]=0.50+depth*0.20;colorArray[i*3+2]=0.90+depth*0.10;
+      sizeArray[i]*=1.0+state.energy*0.2;
+    } else if(state.current==='thinking'){
+      colorArray[i*3]=0.50+depth*0.20;colorArray[i*3+1]=0.15+depth*0.15;colorArray[i*3+2]=0.80+depth*0.20;
+      sizeArray[i]*=1.0+state.energy*0.3;
+    } else if(state.current==='searching'){
       if(p.shapeSlot < 0.3){
         const w = 0.6 + depth * 0.4;
-        colorArray[i*3]=w; colorArray[i*3+1]=w; colorArray[i*3+2]=w;
-        sizeArray[i] *= 0.55;
-        alphaArray[i] *= 0.7 + (0.5+0.5*Math.sin(time*0.045*p.speed+p.phase)) * 0.3;
+        colorArray[i*3]=w;colorArray[i*3+1]=w;colorArray[i*3+2]=w;
+        sizeArray[i]*=0.55;
+        alphaArray[i]*=0.7+(0.5+0.5*Math.sin(time*0.045*p.speed+p.phase))*0.3;
       } else {
-        colorArray[i*3]=0.85+depth*0.15; colorArray[i*3+1]=0.08+depth*0.12; colorArray[i*3+2]=0.12+depth*0.18;
+        colorArray[i*3]=0.85+depth*0.15;colorArray[i*3+1]=0.08+depth*0.12;colorArray[i*3+2]=0.12+depth*0.18;
       }
-    }
-    if(state.current==='system_search'){
+    } else if(state.current==='system_search'){
       if(p.shapeSlot < 0.3){
         const w = 0.7 + depth * 0.3;
-        colorArray[i*3]=w; colorArray[i*3+1]=w; colorArray[i*3+2]=w;
-        sizeArray[i] *= 0.5;
-        alphaArray[i] *= 0.65 + (0.5+0.5*Math.sin(time*0.045*p.speed+p.phase)) * 0.35;
+        colorArray[i*3]=w;colorArray[i*3+1]=w;colorArray[i*3+2]=w;
+        sizeArray[i]*=0.5;
+        alphaArray[i]*=0.65+(0.5+0.5*Math.sin(time*0.045*p.speed+p.phase))*0.35;
       } else {
-        colorArray[i*3]=0.55+depth*0.2; colorArray[i*3+1]=0.80+depth*0.15; colorArray[i*3+2]=0.25+depth*0.15;
+        colorArray[i*3]=0.55+depth*0.2;colorArray[i*3+1]=0.80+depth*0.15;colorArray[i*3+2]=0.25+depth*0.15;
       }
-    }
-    if(state.current==='system_launch'){
+    } else if(state.current==='system_launch'){
       if(p.shapeSlot < 0.3){
         const w = 0.9 + depth * 0.1;
-        colorArray[i*3]=w; colorArray[i*3+1]=w; colorArray[i*3+2]=w;
-        sizeArray[i] *= 0.6;
-        alphaArray[i] *= 0.8 + (0.5+0.5*Math.sin(time*0.045*p.speed+p.phase)) * 0.2;
+        colorArray[i*3]=w;colorArray[i*3+1]=w;colorArray[i*3+2]=w;
+        sizeArray[i]*=0.6;
+        alphaArray[i]*=0.8+(0.5+0.5*Math.sin(time*0.045*p.speed+p.phase))*0.2;
       } else {
-        colorArray[i*3]=0.90+depth*0.10; colorArray[i*3+1]=0.60+depth*0.20; colorArray[i*3+2]=0.10+depth*0.15;
+        colorArray[i*3]=0.90+depth*0.10;colorArray[i*3+1]=0.60+depth*0.20;colorArray[i*3+2]=0.10+depth*0.15;
       }
+    } else {
+      const baseR = p.isAmber ? 0.82 : 0.88;
+      const baseG = p.isAmber ? 0.47 : 0.80;
+      const baseB = p.isAmber ? 0.24 : 0.62;
+      colorArray[i*3]=baseR+depth*0.18;colorArray[i*3+1]=baseG+depth*0.22;colorArray[i*3+2]=baseB+depth*0.16;
     }
   }
   geometry.attributes.position.needsUpdate=true;
@@ -170,10 +178,17 @@ if(typeof require !== 'undefined'){
     ipcRenderer.send('orb-drag-end');
   });
 
-  ipcRenderer.on('orb-state',(event,name)=>{
-    const c=STATE_CONFIG[name];
-    if(c){state.current=name;state.targetEnergy=c.e;state.targetRotSpeed=c.r;}
+  ipcRenderer.on('orb-state',(event,data)=>{
+    if(typeof data === 'string'){
+      const c=STATE_CONFIG[data];
+      if(c){state.current=data;state.targetEnergy=c.e;state.targetRotSpeed=c.r;}
+    } else if(data && data.name){
+      state.current=data.name;
+      state.targetEnergy=data.energy;
+      state.targetRotSpeed=data.rotSpeed;
+    }
   });
+  ipcRenderer.send('orb-ready');
 }
 </script>
 </body>
