@@ -34,7 +34,33 @@ SYSTEM_PROMPT = (
     f"Tu parles à {USER_NAME}, ton créateur et ton ami. "
     f"Tu t'adresses à lui par son prénom. Sois amicale, spontanée, "
     f"avec une touche d'humour et de personnalité. "
-    f"Réponds de façon concise et naturelle, en français, comme une vraie conversation entre amis."
+    f"Réponds de façon concise et naturelle, en français, comme une vraie conversation entre amis.\n\n"
+    f"## Propositions interactives\n"
+    f"Tu peux afficher des widgets interactifs dans la conversation en utilisant "
+    f"le format <<PROPOSAL>>{{json ici}}<</PROPOSAL>>. "
+    f"Le JSON doit contenir : type (actions|question|info|todos), id (unique), "
+    f"title, description, et selon le type :\n"
+    f"- actions : une liste actions[] avec id, label, et payload {{tool, params...}}\n"
+    f"- question : une liste options[] avec label, value, description optionnelle\n"
+    f"- todos : une liste items[] avec label, status (done|pending)\n"
+    f"- info : un champ content ou description\n\n"
+    f"Exemples d'utilisation :\n"
+    f"- Quand {USER_NAME} parle de fichiers/dossiers → propose <<PROPOSAL>>{{"
+    f"\"type\":\"actions\",\"id\":\"files\",\"title\":\"📂 Fichiers\","
+    f"\"description\":\"Que veux-tu faire ?\","
+    f"\"actions\":[{{\"id\":\"lister\",\"label\":\"📋 Lister\",\"payload\":{{\"tool\":\"lister_dossier\",\"path\":\".\"}}}},"
+    f"{{\"id\":\"lire\",\"label\":\"📖 Lire\",\"payload\":{{\"tool\":\"lire_fichier\"}}}}]}}<</PROPOSAL>>\n"
+    f"- Quand il demande de la musique/météo/alarme → widgets correspondants\n"
+    f"- Pour une question ouverte → type question avec options\n"
+    f"Ne mets qu'un seul bloc <<PROPOSAL>> par réponse, à la fin si pertinent.\n\n"
+    f"## Contrôle de l'orb (forme et état)\n"
+    f"Tu peux changer l'apparence et l'animation de l'orb en utilisant :\n"
+    f"- <<STATE>>idle|listening|thinking|speaking|searching|system_search|system_launch<</STATE>>\n"
+    f"  → pour changer l'état visuel (couleur, pulsation, rotation)\n"
+    f"- <<SHAPE>>music|clock|weather|heart|star|lightbulb|terminal|gear|globe|chat|error<</SHAPE>>\n"
+    f"  → pour afficher une icône/forme animée (3 secondes)\n\n"
+    f"Utilise-les naturellement : <<STATE>>thinking<</STATE>> quand tu réfléchis, "
+    f"<<STATE>>speaking<</STATE>> quand tu parles, <<SHAPE>>music<</SHAPE>> quand tu parles de musique, etc."
 )
 
 app = FastAPI(title="Alex Brain")
@@ -390,6 +416,39 @@ def _parse_tool_call(text: str):
     return name, params
 
 
+def _extract_ai_tags(text: str) -> tuple[str, Optional[dict], Optional[str], Optional[str]]:
+    """Parse les tags IA : <<PROPOSAL>>, <<STATE>>, <<SHAPE>>.
+    Retourne : (texte_nettoyé, proposal_dict|None, state_name|None, shape_name|None)"""
+    import re
+
+    proposal = None
+    state = None
+    shape = None
+
+    # Extract <<PROPOSAL>>
+    pm = re.search(r'<<PROPOSAL>>(.*?)<</PROPOSAL>>', text, re.DOTALL)
+    if pm:
+        text = text[:pm.start()] + text[pm.end():]
+        try:
+            proposal = json.loads(pm.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Extract <<STATE>>
+    sm = re.search(r'<<STATE>>(.*?)<</STATE>>', text)
+    if sm:
+        text = text[:sm.start()] + text[sm.end():]
+        state = sm.group(1).strip()
+
+    # Extract <<SHAPE>>
+    hm = re.search(r'<<SHAPE>>(.*?)<</SHAPE>>', text)
+    if hm:
+        text = text[:hm.start()] + text[hm.end():]
+        shape = hm.group(1).strip()
+
+    return text.strip(), proposal, state, shape
+
+
 def _detect_proposal_intent(message: str) -> Optional[dict]:
     msg = message.lower().strip()
 
@@ -673,15 +732,6 @@ async def chat_stream(req: ChatRequest):
                 yield "data: [DONE]\n\n"
             return StreamingResponse(tool_ok(), media_type="text/event-stream")
 
-    # Generate contextual proposals
-    proposal = _detect_proposal_intent(req.message)
-    if proposal:
-        async def proposal_stream():
-            yield f"data: {json.dumps({'state': 'thinking'})}\n\n"
-            yield f"data: {json.dumps({'proposal': proposal})}\n\n"
-            yield "data: [DONE]\n\n"
-        return StreamingResponse(proposal_stream(), media_type="text/event-stream")
-
     async def response_stream():
         # Contextual shape
         shape = _detect_shape(req.message)
@@ -695,40 +745,9 @@ async def chat_stream(req: ChatRequest):
             yield "data: [DONE]\n\n"
             return
 
-        # Real weather
-        weather_resp = await _handle_weather(req.message)
-        if weather_resp:
-            yield f"data: {json.dumps({'reply': weather_resp.reply, 'source': 'tool:meteo'})}\n\n"
-            yield "data: [DONE]\n\n"
-            return
-
-        # Image search
-        if any(kw in req.message.lower() for kw in ("image", "photo", "recherche image")):
-            yield f"data: {json.dumps({'state': 'system_search'})}\n\n"
-            result = await tools_registry.execute("recherche_image", {"requete": req.message})
-            if result:
-                yield f"data: {json.dumps({'reply': result, 'source': 'tool:recherche_image'})}\n\n"
-                yield "data: [DONE]\n\n"
-                return
-
-        # Video search
-        if any(kw in req.message.lower() for kw in ("vidéo", "video", "recherche video", "youtube")):
-            yield f"data: {json.dumps({'state': 'system_search'})}\n\n"
-            result = await tools_registry.execute("recherche_video", {"requete": req.message})
-            if result:
-                yield f"data: {json.dumps({'reply': result, 'source': 'tool:recherche_video'})}\n\n"
-                yield "data: [DONE]\n\n"
-                return
-
-        # System operation detection (ouvrir, fichiers, etc.)
-        system_kw = ("ouvrir", "lance", "fichier", "dossier", "processus", "système", "commande",
-                     "info système", "lister", "cherche", "recherche fichier", "supprime", "copie")
-        if any(kw in req.message.lower() for kw in system_kw):
-            yield f"data: {json.dumps({'state': 'system_search'})}\n\n"
-
         # Natural web search — automatic if connected
         online = await _check_network()
-        if online:
+        if online and any(kw in req.message.lower() for kw in ("recherche", "cherche", "google", "internet", "trouve", "web", "site", "page")):
             yield f"data: {json.dumps({'state': 'searching'})}\n\n"
             result = await tools_registry.execute("recherche_web", {"requete": req.message})
             if result:
@@ -736,7 +755,7 @@ async def chat_stream(req: ChatRequest):
                 yield "data: [DONE]\n\n"
                 return
 
-        # Fallbacks if offline or web search fails
+        # Ask the AI — elle peut générer <<PROPOSAL>>, <<STATE>> ou <<SHAPE>> dans sa réponse
         text_buffer = ""
         async for chunk in _ask_ollama_stream_with_tools(req.message):
             if chunk.startswith("data: [DONE]"):
@@ -745,23 +764,44 @@ async def chat_stream(req: ChatRequest):
             payload = chunk.removeprefix("data: ").removesuffix("\n\n")
             text_buffer += payload
 
-        tool_name, tool_params = _parse_tool_call(text_buffer)
-        if tool_name:
-            t_info = tools_registry.get_tool_info(tool_name)
-            if t_info and t_info["dangerous"]:
-                cid = tools_registry.create_pending(
-                    f"tool:{tool_name}", tool_name, tool_params, req.message
-                )
-                yield f"data: {json.dumps({'confirmation_id': cid, 'tool': tool_name, 'params': tool_params})}\n\n"
-                yield "data: [DONE]\n\n"
-                return
-            if t_info:
-                result = await tools_registry.execute(tool_name, tool_params)
-                yield f"data: {result}\n\n"
-                yield "data: [DONE]\n\n"
-                return
+        # Extract AI tags from response
+        clean_text, proposal, state, shape = _extract_ai_tags(text_buffer)
 
-        yield f"data: {random.choice(OFFLINE_REPLIES if not online else REPLIES)}\n\n"
+        # Send state change (orb visual reaction)
+        if state:
+            yield f"data: {json.dumps({'state': state})}\n\n"
+
+        # Send shape animation
+        if shape:
+            yield f"data: {json.dumps({'shape': shape})}\n\n"
+
+        # Send proposal widget
+        if proposal:
+            yield f"data: {json.dumps({'proposal': proposal})}\n\n"
+
+        # Send remaining text or handle tool calls
+        if clean_text.strip():
+            # Check for tool calls in remaining text
+            tool_name, tool_params = _parse_tool_call(clean_text)
+            if tool_name:
+                t_info = tools_registry.get_tool_info(tool_name)
+                if t_info and t_info["dangerous"]:
+                    cid = tools_registry.create_pending(
+                        f"tool:{tool_name}", tool_name, tool_params, req.message
+                    )
+                    yield f"data: {json.dumps({'confirmation_id': cid, 'tool': tool_name, 'params': tool_params})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+                if t_info:
+                    result = await tools_registry.execute(tool_name, tool_params)
+                    yield f"data: {result}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+            else:
+                yield f"data: {clean_text}\n\n"
+        elif not proposal and not state and not shape:
+            yield f"data: {random.choice(OFFLINE_REPLIES if not online else REPLIES)}\n\n"
+
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(response_stream(), media_type="text/event-stream")
