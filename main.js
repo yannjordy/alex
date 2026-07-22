@@ -184,6 +184,20 @@ ipcMain.on('toggle-desktop-orb', (event, enable)=>{
   }
 });
 
+/* Drag de l'orb du bureau */
+ipcMain.on('orb-drag-start', ()=>{
+  if(orbWin && !orbWin.isDestroyed()) orbWin.setAlwaysOnTop(true, 'screen-saver');
+});
+ipcMain.on('orb-drag-move', (event, dx, dy)=>{
+  if(orbWin && !orbWin.isDestroyed()){
+    const b = orbWin.getBounds();
+    orbWin.setBounds({ x: b.x + dx, y: b.y + dy, width: b.width, height: b.height });
+  }
+});
+ipcMain.on('orb-drag-end', ()=>{
+  if(orbWin && !orbWin.isDestroyed()) orbWin.setAlwaysOnTop(false);
+});
+
 /* Synchroniser l'état de l'orb vers la fenêtre du bureau */
 const orbStates = ['idle','listening','thinking','speaking','searching','system_search','system_launch'];
 ipcMain.on('orb-state-changed', (event, state)=>{
