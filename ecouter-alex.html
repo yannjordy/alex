@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Parler à Alex</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #0f1115; color: #eee; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 30px 16px; }
+  h1 { font-size: 20px; margin-bottom: 6px; }
+  .hint { color: #888; font-size: 13px; margin-bottom: 24px; text-align: center; max-width: 520px; line-height: 1.5; }
+  #mic { width: 110px; height: 110px; border-radius: 50%; border: none; font-size: 46px; cursor: pointer; background: #7c3aed; transition: .2s; }
+  #mic.on { background: #dc2626; animation: pulse 1.2s infinite; }
+  #mic:hover { transform: scale(1.05); }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(220,38,38,.6);} 70% { box-shadow: 0 0 0 22px rgba(220,38,38,0);} 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0);} }
+  #status { margin: 16px 0 20px; font-size: 14px; color: #6ee7b7; height: 20px; }
+  #live { font-size: 17px; color: #c4b5fd; min-height: 24px; max-width: 700px; text-align: center; margin-bottom: 14px; font-style: italic; }
+  #chat { width: 100%; max-width: 700px; min-height: 320px; max-height: 55vh; overflow-y: auto; background: #1a1d24; border: 1px solid #333; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg-row { max-width: 82%; display: flex; flex-direction: column; gap: 2px; }
+  .msg-row.me { align-self: flex-end; align-items: flex-end; }
+  .msg-row.alex { align-self: flex-start; align-items: flex-start; }
+  .msg { padding: 10px 14px; border-radius: 12px; font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
+  .me .msg { background: #2563eb; }
+  .alex .msg { background: #2a2d3a; }
+  .copy-btn { align-self: flex-start; background: none; border: none; color: #888; font-size: 12px; cursor: pointer; padding: 2px 6px; border-radius: 6px; }
+  .copy-btn:hover { color: #eee; background: rgba(255,255,255,.08); }
+  .btns { display: flex; gap: 10px; margin-top: 14px; }
+  button.small { padding: 10px 22px; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; background: #374151; color: #eee; }
+  button.small.primary { background: #7c3aed; }
+</style>
+</head>
+<body>
+<h1><svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px;color:currentColor"><rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M5 11a7 7 0 0014 0M12 19v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg> Parler à Alex</h1>
+<p class="hint">Clique sur le micro, parle en <b>français</b>. Après une pause, Alex reçoit ta phrase, te répond <b>à voix haute</b> — tout en local.</p>
+
+<button id="mic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px;color:currentColor"><rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M5 11a7 7 0 0014 0M12 19v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+<div id="status">Prêt — cerveau Alex local :8765</div>
+<div id="live"></div>
+<div id="chat"></div>
+<div class="btns">
+  <button class="small" id="clear"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px;color:currentColor"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg> Effacer la conversation</button>
+</div>
+
+<audio id="speaker"></audio>
+
+<script>
+const BRAIN = 'http://127.0.0.1:8765';
+const mic = document.getElementById('mic');
+const chat = document.getElementById('chat');
+const live = document.getElementById('live');
+const status = document.getElementById('status');
+const speaker = document.getElementById('speaker');
+let rec = null, buf = [], flushTimer = null, sending = false, thinking = false, pendingAudio = false;
+let busy = false, abortChat = null;
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SR) { status.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px;color:currentColor"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.8"/><path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg> Chrome requis'; mic.disabled = true; }
+
+function setBtn(mode) {
+  if (mode === 'busy') {
+    mic.innerHTML = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px;color:currentColor"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>'; mic.classList.add('on'); mic.title = 'Interrompre Alex';
+  } else if (mode === 'listen') {
+    mic.innerHTML = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px;color:currentColor"><rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M5 11a7 7 0 0014 0M12 19v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'; mic.classList.add('on'); mic.title = 'J\'écoute — clique pour arrêter';
+  } else {
+    mic.innerHTML = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px;color:currentColor"><rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M5 11a7 7 0 0014 0M12 19v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'; mic.classList.remove('on'); mic.title = 'Clique pour parler';
+  }
+}
+
+function interrupt() {
+  clearTimeout(flushTimer);
+  if (abortChat) { abortChat.abort(); abortChat = null; }
+  speaker.pause(); speaker.removeAttribute('src'); speaker.load();
+  stopRec();
+  buf = []; thinking = false; sending = false; pendingAudio = false; busy = false;
+  setBtn('idle');
+  status.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px;color:currentColor"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg> Interrompu — clique sur le micro pour reparler';
+}
+
+function stopRec() {
+  if (rec) { rec.onend = null; try { rec.stop(); } catch(_) {} rec = null; }
+  live.textContent = '';
+}
+
+const SVG_CLIP = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>';
+const SVG_CHECK = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px"><polyline points="20 6 9 17 4 12"/></svg>';
+
+function addMsg(cls, text) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-row ' + cls;
+  const d = document.createElement('div');
+  d.className = 'msg ' + cls;
+  d.textContent = text;
+  const btn = document.createElement('button');
+  btn.className = 'copy-btn';
+  btn.innerHTML = SVG_CLIP + 'Copier';
+  btn.onclick = () => {
+    const done = () => { btn.innerHTML = SVG_CHECK + 'Copié'; setTimeout(() => btn.innerHTML = SVG_CLIP + 'Copier', 1500); };
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(done).catch(done);
+    else done();
+  };
+  wrap.appendChild(d);
+  wrap.appendChild(btn);
+  chat.appendChild(wrap);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function speakReply(text) {
+  if (!busy) return;
+  pendingAudio = true;
+  try {
+    const r = await fetch(BRAIN + '/vocal', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text, voice: 'denise'})
+    });
+    if (!r.ok) throw new Error('vocal ' + r.status);
+    const blob = await r.blob();
+    if (!busy) return;
+    speaker.src = URL.createObjectURL(blob);
+    await speaker.play();
+    status.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px;color:currentColor"><path d="M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 010 7M18.5 5.5a9 9 0 010 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg> Alex parle... (clique le bouton stop pour couper)';
+    await new Promise(res => { speaker.onended = res; speaker.onerror = res; });
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+  }
+  pendingAudio = false;
+  if (busy) {
+    busy = false;
+    setBtn('idle');
+    status.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px;color:currentColor"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.8"/><path d="M8 12l3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg> Fini — clique sur le micro pour reparler';
+  }
+}
+
+async function askBrain(message) {
+  thinking = true;
+  busy = true;
+  setBtn('busy');
+  status.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px;color:currentColor"><rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><rect x="9" y="9" width="6" height="6" stroke="currentColor" stroke-width="1.8"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg> Alex réfléchit... (clique le bouton stop pour couper)';
+  try {
+    abortChat = new AbortController();
+    const r = await fetch(BRAIN + '/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message}),
+      signal: abortChat.signal
+    });
+    const data = await r.json();
+    abortChat = null;
+    thinking = false;
+    addMsg('alex', data.reply);
+    await speakReply(data.reply);
+  } catch (e) {
+    abortChat = null;
+    thinking = false;
+    if (e.name === 'AbortError') return;
+    busy = false;
+    setBtn('idle');
+    status.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px;color:currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 9v4M12 17h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg> Cerveau Alex injoignable (lance l\'app)';
+    addMsg('alex', '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px;color:currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 9v4M12 17h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg> ' + e.message);
+  }
+}
+
+async function flush() {
+  if (sending || busy) return;
+  const chunk = buf.join(' ').trim();
+  if (!chunk) return;
+  buf = [];
+  sending = true;
+  stopRec();
+  addMsg('me', chunk);
+  status.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px;color:currentColor"><rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><rect x="9" y="9" width="6" height="6" stroke="currentColor" stroke-width="1.8"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg> Alex réfléchit...';
+  await askBrain(chunk);
+  sending = false;
+}
+
+function scheduleFlush() {
+  clearTimeout(flushTimer);
+  flushTimer = setTimeout(flush, 2200);
+}
+
+function start() {
+  rec = new SR();
+  rec.lang = 'fr-FR';
+  rec.interimResults = true;
+  rec.continuous = true;
+  let wantStop = false;
+  rec.onresult = (e) => {
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) {
+        buf.push(e.results[i][0].transcript.trim());
+        scheduleFlush();
+      }
+    }
+    live.textContent = e.results[e.results.length - 1][0].transcript;
+  };
+  rec.onerror = (e) => { status.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px;color:currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 9v4M12 17h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg> ' + e.error; stop(); };
+  rec.onend = () => { if (!wantStop && rec) { try { rec.start(); } catch(_) {} } else if (wantStop) { clearTimeout(flushTimer); flush(); } };
+  rec.start();
+  setBtn('listen');
+  status.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px"><circle cx="12" cy="12" r="6" fill="#ff5f56"/></svg> Écoute... parle (pause = réponse d\'Alex)';
+}
+function stop() {
+  stopRec();
+  clearTimeout(flushTimer);
+  flush();
+  if (!busy) setBtn('idle');
+}
+mic.onclick = () => {
+  if (busy) { interrupt(); return; }
+  if (rec) stop(); else start();
+};
+
+document.getElementById('clear').onclick = () => { chat.innerHTML = ''; };
+window.onbeforeunload = () => { if (rec) try { rec.stop(); } catch(_) {} };
+
+fetch(BRAIN + '/health').then(r => r.json()).then(d => {
+  status.textContent = 'Prêt — modèle ' + d.model;
+}).catch(() => { status.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="vertical-align:-3px"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 9v4M12 17h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg> Lance Alex d\'abord'; });
+</script>
+</body>
+</html>

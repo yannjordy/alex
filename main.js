@@ -1,5 +1,7 @@
 const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, globalShortcut } = require('electron');
 const { spawn } = require('child_process');
+const path = require('path');
+const alexConfig = require('./config.js');
 
 /* =====================================================================
    ALEX — coquille (étape 1/4)
@@ -65,9 +67,17 @@ function animateTo(targetBounds, duration = 320){
 }
 
 function setMode(newMode){
-  if(mode === newMode || win.isDestroyed()) return;
+  if(win.isDestroyed()) return;
+  const target = computeBounds(newMode);
+  const b = win.getBounds();
+  // Idem seulement si le mode ET les bounds réels correspondent déjà
+  const already = mode === newMode
+    && Math.abs(b.width - target.width) <= 2
+    && Math.abs(b.height - target.height) <= 2;
+  if(already) return;
   mode = newMode;
-  animateTo(computeBounds(mode));
+  prevBounds = null; // invalide un éventuel état plein écran en attente
+  animateTo(target);
   if(alwaysOnTopEnabled) win.setAlwaysOnTop(true, 'screen-saver');
   win.webContents.send('mode-changed', mode);
 }
@@ -76,6 +86,7 @@ function createWindow(){
   const bounds = computeBounds('full');
   win = new BrowserWindow({
     ...bounds,
+    icon: path.join(__dirname, 'icon.png'),
     transparent: true,
     frame: false,
     resizable: false,
@@ -98,15 +109,32 @@ function createWindow(){
     if(alwaysOnTopEnabled && !win.isDestroyed()) win.setAlwaysOnTop(true, 'screen-saver');
   }, 3000);
 
-  ipcMain.on('set-mode', (event, newMode)=> setMode(newMode));
+  ipcMain.on('set-mode', (event, newMode)=> {
+    setMode(newMode);
+  });
+  ipcMain.on('shot-now', (event, file)=> {
+    win.webContents.capturePage().then(img=>{
+      require('fs').writeFileSync(file, img.toPNG());
+    }).catch(e=> console.error('shot fail', e));
+  });
 }
 
-let alwaysOnTopEnabled = true;
+let alwaysOnTopEnabled = alexConfig.read().alwaysOnTop !== false;
+
+/* Applique un état explicite (évite les bascules croisées entre les fenêtres) */
+function setAlwaysOnTop(next){
+  const target = next !== false;
+  if(target !== alwaysOnTopEnabled){
+    alwaysOnTopEnabled = target;
+    if(win && !win.isDestroyed()) win.setAlwaysOnTop(alwaysOnTopEnabled, 'screen-saver');
+    rebuildMenus();
+  }
+  alexConfig.write({ alwaysOnTop: alwaysOnTopEnabled });
+  return alwaysOnTopEnabled;
+}
 
 function toggleAlwaysOnTop(){
-  alwaysOnTopEnabled = !alwaysOnTopEnabled;
-  if(!win.isDestroyed()) win.setAlwaysOnTop(alwaysOnTopEnabled, 'screen-saver');
-  rebuildMenus();
+  return setAlwaysOnTop(!alwaysOnTopEnabled);
 }
 
 function rebuildMenus(){
@@ -122,13 +150,18 @@ function rebuildMenus(){
 }
 
 function createTray(){
-  const size = 16;
-  const svg = `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">
-    <circle cx="${size/2}" cy="${size/2}" r="${size/2-1}" fill="#ff9d3d"/>
-  </svg>`;
-  const dataUrl = 'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64');
-  const icon = nativeImage.createFromDataURL(dataUrl);
-  icon.setTemplateImage(true);
+  const iconPath = path.join(__dirname, 'icon.png');
+  let icon;
+  if (require('fs').existsSync(iconPath)) {
+    icon = nativeImage.createFromPath(iconPath);
+  } else {
+    const size = 16;
+    const svg = `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="${size/2}" cy="${size/2}" r="${size/2-1}" fill="#ff9d3d"/>
+    </svg>`;
+    icon = nativeImage.createFromDataURL('data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64'));
+    icon.setTemplateImage(true);
+  }
   tray = new Tray(icon);
   tray.setToolTip('Alex');
   rebuildMenus();
@@ -166,21 +199,34 @@ ipcMain.on('set-info-mode', (event, enable)=>{
 });
 
 let prevBounds = null;
+let prevModeFullscreen = null;
 ipcMain.on('toggle-fullscreen', ()=> {
   if(win.isDestroyed()) return;
   if(prevBounds){
     win.setBounds(prevBounds);
     prevBounds = null;
+    if(prevModeFullscreen){
+      mode = prevModeFullscreen;
+      prevModeFullscreen = null;
+      win.webContents.send('mode-changed', mode);
+    }
   } else {
     prevBounds = win.getBounds();
+    prevModeFullscreen = mode;
     const disp = screen.getPrimaryDisplay();
     win.setBounds(disp.workArea);
   }
 });
 
-ipcMain.on('toggle-always-top', (event)=> {
-  toggleAlwaysOnTop();
-  event.sender.send('always-top-changed', alwaysOnTopEnabled);
+ipcMain.on('toggle-always-top', (event, enable)=> {
+  const next = (typeof enable === 'boolean') ? enable : !alwaysOnTopEnabled;
+  const applied = setAlwaysOnTop(next);
+  if(event && event.sender && !event.sender.isDestroyed()){
+    event.sender.send('always-top-changed', applied);
+  }
+  if(win && !win.isDestroyed()){
+    win.webContents.send('settings-sync', alexConfig.read());
+  }
 });
 
 /* --- Orb du bureau --- */
@@ -197,19 +243,21 @@ function createOrbWindow(){
     hasShadow: false, skipTaskbar: true,
     focusable: false, alwaysOnTop: false,
     backgroundColor: '#00000000',
-    webPreferences: { nodeIntegration: true, contextIsolation: false }
+    webPreferences: { nodeIntegration: true, contextIsolation: false, backgroundThrottling: false }
   });
   orbWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   orbWin.loadFile('orb-desktop.html');
   orbWin.on('closed', ()=>{ orbWin = null; });
 }
 ipcMain.on('toggle-desktop-orb', (event, enable)=>{
-  if(enable && !orbWin){
+  const on = enable !== false;
+  if(on && !orbWin){
     createOrbWindow();
-  } else if(!enable && orbWin){
+  } else if(!on && orbWin){
     orbWin.close();
     orbWin = null;
   }
+  alexConfig.write({ desktopOrb: on });
 });
 
 /* L'orb signale qu'il est prêt → lui renvoyer le dernier état */
@@ -239,6 +287,54 @@ ipcMain.on('orb-state-changed', (event, data)=>{
   _lastOrbState = data;
   if(orbWin && !orbWin.isDestroyed()) orbWin.webContents.send('orb-state', data);
 });
+
+/* --- Orb : clic → lire l'écran (vision opencode) --- */
+let _orbBusy = false;
+ipcMain.on('orb-click', async ()=>{
+  if(_orbBusy) return;
+  _orbBusy = true;
+  /* orb passe en écoute (feedback visuel) */
+  if(orbWin && !orbWin.isDestroyed()) orbWin.webContents.send('orb-state', {name:'listening', energy:0.2, rotSpeed:0.01});
+  try {
+    const resp = await fetch('http://127.0.0.1:8765/vision', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({question:"Décris ce qui est à l'écran en 2-3 phrases orales, français."})
+    });
+    const data = await resp.json();
+    const text = data.analysis || data.error || "Je n'ai rien vu.";
+    /* orb parle (feedback) */
+    if(orbWin && !orbWin.isDestroyed()) orbWin.webContents.send('orb-state', {name:'speaking', energy:0.4, rotSpeed:0.006});
+    /* afficher dans la fenêtre principale + prononcer */
+    if(win && !win.isDestroyed()){
+      win.webContents.send('orb-vision-result', {text, url: data.url || null});
+    }
+    setTimeout(()=>{ if(orbWin && !orbWin.isDestroyed()) orbWin.webContents.send('orb-state', {name:'idle', energy:0.12, rotSpeed:0.0035}); }, 3000);
+  } catch(e) {
+    console.error('[orb-vision]', e);
+    if(orbWin && !orbWin.isDestroyed()) orbWin.webContents.send('orb-state', {name:'idle', energy:0.12, rotSpeed:0.0035});
+  }
+  _orbBusy = false;
+});
+
+/* --- Orb : clic droit → menu --- */
+ipcMain.on('orb-menu', ()=>{
+  if(!orbWin || orbWin.isDestroyed()) return;
+  const b = orbWin.getBounds();
+  const menu = Menu.buildFromTemplate([
+    { label:'Lire l\'écran', click: ()=> orbWin.webContents.send('orb-click') },
+    { label:'Ouvrir Alex', click: ()=>{ if(win && !win.isDestroyed()){ win.show(); win.focus(); } } },
+    { type:'separator' },
+    { label:'Muette', type:'checkbox', checked: _orbMuted, click: (mi)=>{ _orbMuted = mi.checked; } },
+    { label:'Position par défaut', click: ()=>{
+        const disp = screen.getPrimaryDisplay();
+        orbWin.setBounds({ x: Math.round(disp.bounds.x+disp.bounds.width/2-150), y: Math.round(disp.bounds.y+disp.bounds.height/2-150), width:300, height:300 });
+      }},
+    { type:'separator' },
+    { label:'Fermer l\'orb', click: ()=>{ orbWin.close(); orbWin=null; } }
+  ]);
+  menu.popup({ window: orbWin });
+});
+let _orbMuted = false;
 
 /* --- Media viewer : repositionne la fenêtre --- */
 let prevModeForMedia = null;
@@ -312,11 +408,21 @@ function stopBrain(){
 }
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
+// Instance unique : relancer depuis le menu focus la fenêtre existante.
+if(!app.requestSingleInstanceLock()){
+  app.quit();
+} else {
+  app.on('second-instance', ()=>{
+    if(win && !win.isDestroyed()){ win.show(); win.moveTop(); }
+  });
+}
+
 app.whenReady().then(()=>{
   createWindow();
   createTray();
   startBrain();
-  createOrbWindow();
+  if(alexConfig.read().desktopOrb) createOrbWindow();
   globalShortcut.register('Alt+Space', ()=> setMode(mode === 'full' ? 'island' : 'full'));
 });
 

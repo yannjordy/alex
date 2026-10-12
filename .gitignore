@@ -19,3 +19,11 @@ node_modules/
 *.wasm
 *.typeface.json
 *.module.js
+brain/tts/*.onnx
+brain/tts/*.onnx.json
+brain/tts/*.aria2
+vendor/
+.alex-opencode-sid
+.alex-vision-sid
+*.onnx
+brain/.venv/

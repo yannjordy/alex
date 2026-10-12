@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Alex — Démo visualiseur audio (îlot)</title>
+<style>
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  body{
+    background:#0a0806; color:#f2ede6; font-family:'Cascadia Code','Fira Code','JetBrains Mono',monospace;
+    min-height:100vh; display:flex; flex-direction:column; align-items:center; gap:22px; padding:28px;
+  }
+  h1{ font-size:15px; letter-spacing:3px; color:#ff9d3d; font-weight:600; }
+  .note{ font-size:12px; color:rgba(255,246,234,0.5); max-width:640px; text-align:center; line-height:1.6; }
+  .island{
+    width:210px; height:46px; background:#12100d; border:1px solid rgba(255,157,61,0.25);
+    border-radius:23px; position:relative; overflow:hidden;
+    box-shadow:0 0 24px rgba(255,157,61,0.12);
+  }
+  .island canvas{ width:100%; height:100%; display:block; }
+  .island .tag{
+    position:absolute; left:10px; top:50%; transform:translateY(-50%);
+    font-size:9px; letter-spacing:2px; color:rgba(255,157,61,0.55); pointer-events:none;
+  }
+  .big{ width:520px; height:110px; border-radius:20px; }
+  .big canvas{ filter:drop-shadow(0 0 4px rgba(255,157,61,0.3)); }
+  .controls{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:center; }
+  button{
+    background:rgba(255,157,61,0.12); color:#ffb054; border:1px solid rgba(255,157,61,0.45);
+    padding:8px 18px; border-radius:999px; font-family:inherit; font-size:12.5px; cursor:pointer;
+    transition:all .15s;
+  }
+  button:hover{ background:rgba(255,157,61,0.25); }
+  button.on{ background:#ff9d3d; color:#12100d; font-weight:700; }
+  .styles{ display:flex; gap:8px; }
+  .styles button.sel{ background:#ff9d3d; color:#12100d; font-weight:700; }
+  #status{ font-size:11.5px; color:rgba(255,246,234,0.45); }
+  .lbl{ font-size:10px; letter-spacing:2px; color:rgba(255,157,61,0.45); text-transform:uppercase; }
+</style>
+</head>
+<body>
+  <h1>ALEX — VISUALISEUR AUDIO</h1>
+  <div class="note">Aperçu des styles adaptables à l'îlot (210×46). Active le micro puis parle :<br>ligne plate au repos → réaction fluide au son (inspiré de phase-viz, palette ambre Alex).</div>
+
+  <div class="lbl">îlot réel — 210×46</div>
+  <div class="island" id="isl1"><canvas id="c1"></canvas><span class="tag">ALEX</span></div>
+
+  <div class="lbl">aperçu agrandi — 520×110</div>
+  <div class="island big" id="isl2"><canvas id="c2"></canvas></div>
+
+  <div class="controls">
+    <button id="micBtn">🎙 Activer le micro</button>
+    <div class="styles">
+      <button data-s="hybrid">Hybride (phase-viz)</button>
+      <button data-s="wave">Onde</button>
+      <button data-s="bars">Spectre</button>
+      <button data-s="water" class="sel">Graduations eau</button>
+    </div>
+  </div>
+  <div id="status">micro éteint</div>
+
+<script>
+let audioCtx, analyser, timeArray, freqArray, micActive = false, level = 0;
+let style = 'water';
+const bars = Array.from({length: 18}, ()=> ({h: 0, phase: Math.random()*Math.PI*2}));
+
+const c1 = document.getElementById('c1'), x1 = c1.getContext('2d');
+const c2 = document.getElementById('c2'), x2 = c2.getContext('2d');
+function sizeCanvas(c){
+  const r = c.parentNode.getBoundingClientRect();
+  c.width = Math.round(r.width); c.height = Math.round(r.height);
+}
+sizeCanvas(c1); sizeCanvas(c2);
+
+const micBtn = document.getElementById('micBtn');
+const status = document.getElementById('status');
+micBtn.addEventListener('click', async ()=>{
+  if(micActive){
+    micSource.mediaStream.getTracks().forEach(t=>t.stop());
+    audioCtx.close(); micActive = false;
+    micBtn.textContent = '🎙 Activer le micro'; micBtn.classList.remove('on');
+    status.textContent = 'micro éteint';
+    return;
+  }
+  const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+  audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.35;
+  timeArray = new Uint8Array(analyser.fftSize);
+  freqArray = new Uint8Array(analyser.frequencyBinCount);
+  micSource = audioCtx.createMediaStreamSource(stream);
+  micSource.connect(analyser);
+  micActive = true;
+  micBtn.textContent = '🎙 Micro actif'; micBtn.classList.add('on');
+  status.textContent = 'parle dans le micro…';
+});
+
+document.querySelectorAll('.styles button').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    document.querySelectorAll('.styles button').forEach(x=>x.classList.remove('sel'));
+    b.classList.add('sel'); style = b.dataset.s;
+  });
+});
+
+function drawViz(ctx, W, H){
+  const mid = Math.round(H/2) + 0.5;
+  const t = Date.now()*0.001;
+  ctx.clearRect(0,0,W,H);
+
+  if(micActive && analyser){
+    if(audioCtx.state === 'suspended') audioCtx.resume();
+    analyser.getByteTimeDomainData(timeArray);
+    analyser.getByteFrequencyData(freqArray);
+    let sum = 0;
+    for(let i=0;i<timeArray.length;i++){ const v=(timeArray[i]-128)/128; sum+=v*v; }
+    const vol = Math.min(1, Math.sqrt(sum/timeArray.length)*4.5);
+    level += (vol - level)*0.4;
+  } else level *= 0.9;
+  const vol = level;
+
+  // repos : ligne plate
+  if(vol < 0.035){
+    ctx.beginPath(); ctx.moveTo(0,mid); ctx.lineTo(W,mid);
+    ctx.strokeStyle = 'rgba(255,157,61,0.65)'; ctx.lineWidth = 1; ctx.lineCap='round';
+    ctx.stroke(); return;
+  }
+
+  const drawBars = (alpha)=>{
+    const barCount = 18;
+    const totalW = W*0.72, startX = (W-totalW)/2, spacing = totalW/barCount;
+    const bw = Math.max(2, spacing*0.54);
+    const grad = ctx.createLinearGradient(0, mid-H*0.3, 0, mid+H*0.3);
+    grad.addColorStop(0, `rgba(255,200,130,${0.7*alpha})`);
+    grad.addColorStop(0.5, `rgba(255,157,61,${0.85*alpha})`);
+    grad.addColorStop(1, `rgba(255,200,130,${0.4*alpha})`);
+    ctx.fillStyle = grad;
+    for(let i=0;i<barCount;i++){
+      const spec = freqArray ? (freqArray[Math.floor(i/barCount*freqArray.length*0.6)]||0)/255 : 0;
+      const energy = Math.min(1, spec*0.9 + vol*0.35);
+      const bh = Math.max(1, energy*(H*0.33));
+      const x = startX + i*spacing + (spacing-bw)/2;
+      ctx.fillRect(x, mid-bh, bw, bh*2);
+    }
+  };
+
+  const drawWave = ()=>{
+    if(!timeArray) return;
+    const sX = W*0.08, eX = W*0.92, dW = eX-sX;
+    const amp = H*(0.1 + vol*0.38);
+    const drift = Math.sin(t*1.6)*H*0.012;
+    const step = Math.max(1, Math.floor(timeArray.length/72));
+    ctx.lineCap='round'; ctx.lineJoin='round';
+    ctx.strokeStyle = `rgba(255,214,150,${0.55+vol*0.4})`;
+    ctx.lineWidth = Math.max(1.5, 1+vol*3);
+    ctx.beginPath(); let st=false;
+    for(let i=0;i<timeArray.length;i+=step){
+      const x = sX + (i/(timeArray.length-1))*dW;
+      const y = mid + ((timeArray[i]-128)/128)*amp + drift;
+      if(!st){ ctx.moveTo(x,y); st=true; } else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,157,61,0.22)'; ctx.lineWidth = 1;
+    ctx.beginPath(); st=false;
+    for(let i=0;i<timeArray.length;i+=step){
+      const x = sX + (i/(timeArray.length-1))*dW;
+      const y = mid - ((timeArray[i]-128)/128)*amp*0.64 - drift;
+      if(!st){ ctx.moveTo(x,y); st=true; } else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  };
+
+  const drawWater = ()=>{
+    const barCount = 18;
+    for(let i=0;i<barCount;i++){
+      const b = bars[i];
+      const k = i/(barCount-1);
+      const env = 0.35 + 0.65*Math.sin(k*Math.PI);
+      const ripple = 0.5 + 0.5*Math.sin(t*2.2 + b.phase + i*0.9);
+      const target = Math.min(1, vol*1.6)*(H/2-2.5)*env*(0.45+0.55*ripple);
+      if(target > b.h) b.h += (target-b.h)*0.45; else b.h += (target-b.h)*0.08;
+      if(b.h < 0.3) b.h = 0;
+      if(b.h < 0.5) continue;
+      const x = (i+0.5)*(W/barCount);
+      const a = 0.35 + Math.min(1, b.h/(H/2-2.5))*0.65;
+      ctx.strokeStyle = `rgba(255,190,110,${a})`;
+      ctx.lineWidth = Math.max(2, W/barCount-2);
+      ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(x, mid-b.h); ctx.lineTo(x, mid+b.h); ctx.stroke();
+    }
+  };
+
+  if(style==='hybrid'){ drawBars(1); drawWave(); }
+  else if(style==='wave'){ drawWave(); }
+  else if(style==='bars'){ drawBars(1); }
+  else drawWater();
+}
+
+function loop(){
+  drawViz(x1, c1.width, c1.height);
+  drawViz(x2, c2.width, c2.height);
+  requestAnimationFrame(loop);
+}
+loop();
+window.addEventListener('resize', ()=>{ sizeCanvas(c1); sizeCanvas(c2); });
+</script>
+</body>
+</html>

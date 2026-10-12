@@ -38,6 +38,10 @@ def match(text: str):
     for pattern, action in COMMANDS:
         m = pattern.search(text)
         if m:
+            if action == "open_app":
+                arg = m.group(1).lower()
+                if "commande" in arg or "shell" in arg or "terminal" in arg or len(arg.split()) > 4:
+                    continue
             return action, m
     return None, None
 

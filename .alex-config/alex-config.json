@@ -3,9 +3,10 @@
   "assistantName": "Alex",
   "greeting": "Salut Jordy, ravie de te retrouver !",
   "appearanceStyle": "orbe",
+  "themeColor": "#f43f5e",
   "activityHints": true,
   "voiceEnabled": true,
-  "currentVoice": "sylvie",
+  "currentVoice": "siwis",
   "alwaysOnTop": true,
   "desktopOrb": false,
   "listenAlways": true

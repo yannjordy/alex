@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export ALEX_LOCAL_MODEL="${ALEX_LOCAL_MODEL:-alex}"
+export ALEX_LOCAL_MODEL="${ALEX_LOCAL_MODEL:-smollm:135m}"
 
-cd /home/jordy/Documents/alex-assistant
+cd /home/jordy/Documents/alex
 
 # S'assurer qu'Ollama tourne
 if ! curl -sf http://127.0.0.1:11434/api/tags > /dev/null 2>&1; then
@@ -11,6 +11,18 @@ if ! curl -sf http://127.0.0.1:11434/api/tags > /dev/null 2>&1; then
   ollama serve &
   for i in $(seq 1 30); do
     if curl -sf http://127.0.0.1:11434/api/tags > /dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+fi
+
+# S'assurer qu'opencode serve tourne (cerveau principal d'Alex)
+if ! curl -sf http://127.0.0.1:4199/api/health > /dev/null 2>&1; then
+  echo "Lancement d'opencode serve..."
+  setsid nohup opencode serve --port 4199 > /tmp/opencode-serve.log 2>&1 < /dev/null &
+  for i in $(seq 1 20); do
+    if curl -sf http://127.0.0.1:4199/api/health > /dev/null 2>&1; then
       break
     fi
     sleep 1
