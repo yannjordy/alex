@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Alex — assistant personnel de bureau (Ubuntu). Fenêtre de chat avec orb centré, se contracte en îlot flottant façon Dynamic Island.",
   "main": "main.js",
+  "author": "yannjordy <yannjordy@users.noreply.github.com>",
   "scripts": {
     "start": "electron --no-sandbox --in-process-gpu .",
     "dist": "electron-builder --linux deb --publish never"
@@ -48,7 +49,7 @@
       "category": "Utility",
       "maintainer": "yannjordy <yannjordy@users.noreply.github.com>",
       "synopsis": "Assistant personnel de bureau avec orbe vocal",
-      "icon": "icon.png"
+      "icon": "assets/icon-512.png"
     }
   }
 }
