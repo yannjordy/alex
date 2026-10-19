@@ -16,14 +16,14 @@ if (!fs.existsSync(configDir)) {
 const DEFAULTS = {
   brainMode: 'auto',
   assistantName: 'Alex',
-  greeting: "Salut Jordy, ravie de te retrouver !",
+  greeting: "",
   appearanceStyle: 'orbe',
   themeColor: '#ff9d3d',
   activityHints: true,
   voiceEnabled: true,
   currentVoice: 'siwis',
   alwaysOnTop: true,
-  desktopOrb: false,
+  desktopOrb: true,
   listenAlways: true,
 };
 

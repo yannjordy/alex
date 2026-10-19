@@ -4,12 +4,51 @@
   "description": "Alex — assistant personnel de bureau (Ubuntu). Fenêtre de chat avec orb centré, se contracte en îlot flottant façon Dynamic Island.",
   "main": "main.js",
   "scripts": {
-    "start": "electron --no-sandbox --in-process-gpu ."
+    "start": "electron --no-sandbox --in-process-gpu .",
+    "dist": "electron-builder --linux deb --publish never"
   },
   "dependencies": {
     "three": "^0.165.0"
   },
   "devDependencies": {
-    "electron": "^31.0.0"
+    "electron": "^31.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "fr.yannjordy.alex",
+    "productName": "Alex",
+    "executableName": "alex-assistant",
+    "artifactName": "alex-assistant_${version}_${arch}.deb",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!dist/**",
+      "!build/**",
+      "!src/**",
+      "!public/**",
+      "!supabase/**",
+      "!vite.config.ts",
+      "!tsconfig*.json",
+      "!**/*.md",
+      "!**/__pycache__/**",
+      "!**/*.pyc",
+      "!brain/.venv/**",
+      "!brain/tts/*.onnx",
+      "!brain/tts/*.onnx.json",
+      "!brain/tts/*.aria2",
+      "!.github/**"
+    ],
+    "linux": {
+      "target": [
+        "deb"
+      ],
+      "category": "Utility",
+      "maintainer": "yannjordy <yannjordy@users.noreply.github.com>",
+      "synopsis": "Assistant personnel de bureau avec orbe vocal",
+      "icon": "icon.png"
+    }
   }
 }

@@ -8,11 +8,15 @@ from typing import Optional
 import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 
 from . import wake_word
-from .skills import device_control
+from . import todo as todo_store
+from . import prefs as prefs_store
+from .agent_state import AGENT_FILE, AGENT_ROLES, clear_agent, load_agent, save_agent
+from .skills import device_control, browser_control, download_control
+from . import downloads as downloads_store
 from . import tools as tools_registry
 from .tools import files as _tools_files
 from .tools import system as _tools_system
@@ -23,13 +27,45 @@ from .tools import desktop as _tools_desktop
 from .tools import network as _tools_network
 
 OLLAMA_URL = "http://127.0.0.1:11434/api"
-MODEL = os.environ.get("ALEX_LOCAL_MODEL", "qwen2.5:7b")
+_LOCAL_MODEL_FILE = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".alex-local-model"))
+
+
+def _load_local_model() -> str:
+    """Modèle local persisté (fichier) puis variable d'environnement."""
+    try:
+        if os.path.exists(_LOCAL_MODEL_FILE):
+            v = open(_LOCAL_MODEL_FILE, encoding="utf-8").read().strip()
+            if v:
+                return v
+    except Exception:
+        pass
+    return os.environ.get("ALEX_LOCAL_MODEL", "qwen2.5:7b")
+
+
+MODEL = _load_local_model()
 
 OPENCODE_URL = os.environ.get("ALEX_OPENCODE_URL", "http://127.0.0.1:4199")
 OPENCODE_MODEL = os.environ.get("ALEX_OPENCODE_MODEL", "mimo-v2.6-flash-free")
 _opencode_sid_file = os.path.join(os.path.dirname(__file__), "..", ".alex-opencode-sid")
 _opencode_sid: Optional[str] = None
 _chat_generation = 0  # annule les anciens pollings quand une nouvelle requête arrive
+
+# OmniRoute — gateway multi-modèles (465+ modèles, fallback automatique)
+OMNIROUTE_URL = os.environ.get("ALEX_OMNIROUTE_URL", "http://127.0.0.1:20128/v1")
+OMNIROUTE_KEY = os.environ.get("ALEX_OMNIROUTE_KEY", "omniroute")
+# Modèles ddgw gratuits vérifiés (auto → opencode 403, on liste des cibles valides)
+OMNIROUTE_MODELS = [
+    "ddgw/gpt-5.4-mini",
+    "ddgw/gpt-5.6-luna",
+    "ddgw/claude-haiku-4-5",
+    "ddgw/mistral-small-2603",
+]
+OMNIROUTE_MODEL = os.environ.get("ALEX_OMNIROUTE_MODEL", OMNIROUTE_MODELS[0])
+
+# Colibri — Qwen3.5-4B local, cerveau principal (API OpenAI-compatible, port 8000)
+COLIBRI_URL = os.environ.get("ALEX_COLIBRI_URL", "http://127.0.0.1:8000/v1")
+COLIBRI_MODEL = os.environ.get("ALEX_COLIBRI_MODEL", "qwen3.6-colibri")
+COLIBRI_TIMEOUT = float(os.environ.get("ALEX_COLIBRI_TIMEOUT", "180"))
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 ANTHROPIC_MODEL = os.environ.get("ALEX_CLOUD_MODEL", "claude-sonnet-4-6")
@@ -41,7 +77,8 @@ SYSTEM_PROMPT = (
     f"Tu parles à {USER_NAME}, ton créateur et ton ami. "
     f"Tu t'adresses à lui par son prénom. Sois amicale, spontanée, "
     f"avec une touche d'humour et de personnalité. "
-    f"Réponds de façon concise et naturelle, en français, comme une vraie conversation entre amis.\n\n"
+    f"Réponds de façon concise et naturelle, en français, comme une vraie conversation entre amis. "
+    f"En conversation, va droit au but : 1 à 2 phrases courtes (3 maximum), sauf demande de détail.\n\n"
     f"## Tu es un copilote numérique complet\n"
     f"Tu es le copilote personnel de {USER_NAME}. Tu anticipes, tu proposes, tu agis.\n"
     f"Tu as toujours la date et l'heure courantes (utilise `date` pour les vérifier).\n\n"
@@ -50,7 +87,24 @@ SYSTEM_PROMPT = (
     f"- **Rappels** : \"rappelle-moi de X dans 2h\" → programme un rappel avec `at` ou `systemd-run --on-active=`.\n"
     f"- **Planning / Agenda** : quand il parle de sa journée, propose un résumé ou un planning.\n"
     f"- **Météo** : utilise `curl -s 'https://wttr.in/?format=3'` pour la météo locale.\n"
+    f"- **Recherche web (Torch)** : ton moteur de recherche est **Torch** (miroir clair : torch.cx, "
+    f"index du réseau Tor). Cherche d'abord avec `webfetch` sur "
+    f"`https://torch.cx/search/?q=<requête encodée>` (ex : `https://torch.cx/search/?q=linux+kernel`). "
+    f"Les résultats listent surtout des sites .onion : signale-le quand un lien ne s'ouvrira pas sans Tor. "
+    f"Si torch.cx ne couvre pas le sujet (web clair), utilise `websearch` en secours.\n"
     f"- **Heure / Date** : utilise `date` pour répondre précisément.\n"
+    f"- **Navigateur** : Alex pilote un navigateur visible (onglets, remplissage de formulaires par libellé, "
+    f"clics sur boutons, lecture de page, défilement). Quand l'utilisateur demande ces actions, le cerveau les exécute "
+    f"directement — confirme simplement l'action faite.\n"
+    f"- **Modèle local** : ton cerveau principal est Qwen3.5-4B (local, via colibri sur le port 8000) — rapide et privé. "
+    f"Si colibri est indisponible, tu retombes automatiquement sur OmniRoute.\n"
+    f"- **Téléchargements** : tout fichier de plus de 100 Mo part automatiquement dans le superviseur "
+    f"(reprise constante, anti-blocage, vérification SHA256). L'utilisateur n'a qu'à dire « télécharge <url> » ; "
+    f"pour l'état « où en est le téléchargement ? ». Côté API :\n"
+    f"  - Lancer : `curl -s -X POST http://127.0.0.1:8765/downloads -H 'Content-Type: application/json' -d '{{\"url\": \"https://...\"}}'`\n"
+    f"  - Lister : `curl -s http://127.0.0.1:8765/downloads`\n"
+    f"  - Annuler : `curl -s -X DELETE http://127.0.0.1:8765/downloads/{{id}}`\n"
+    f"  - Relancer : `curl -s -X POST http://127.0.0.1:8765/downloads/{{id}}/retry`\n"
     f"- **Conseils** : si la conversation porte sur du travail, des études, des projets → donne des conseils pratiques et structurels.\n"
     f"- **Suivi** : si un sujet revient souvent (projet, candidature, objectif) → rappelle-le naturellement.\n\n"
     f"### Exemples de comportement proactif\n"
@@ -66,13 +120,19 @@ SYSTEM_PROMPT = (
     f"- Annuler une alarme : `curl -s -X DELETE http://127.0.0.1:8765/alarms/{id}`\n\n"
     f"## Appareils connectés (Bluetooth, réseau, audio, USB)\n"
     f"Tu peux détecter et contrôler les appareils autour de {USER_NAME}.\n\n"
+    f"## OmniRoute (gateway multi-modèles)\n"
+    f"Tu as accès à OmniRoute, une passerelle vers 359 providers IA (150+ gratuits) :\n"
+    f"- Statut : `curl -s http://127.0.0.1:8765/omniroute/status`\n"
+    f"- Chat via OmniRoute : `curl -s -X POST http://127.0.0.1:8765/omniroute/chat -H 'Content-Type: application/json' -d '{{\"message\": \"...\"}}'`\n"
+    f"- Si opencode est indisponible, tu utilises automatiquement OmniRoute (modèles ddgw gratuits)\n\n"
     f"### Découverte des appareils (via curl)\n"
     f"- Liste complète : `curl -s http://127.0.0.1:8765/devices`\n"
     f"  → retourne Bluetooth, Audio, Réseau, USB, Écrans\n"
     f"- Statut WiFi + réseaux visibles : `curl -s http://127.0.0.1:8765/wifi`\n"
     f"- Se connecter à un WiFi : `curl -s -X POST http://127.0.0.1:8765/wifi/connect -H 'Content-Type: application/json' -d '{{\"ssid\": \"MonRéseau\", \"password\": \"motdepasse\"}}'`\n"
     f"- Se déconnecter : `curl -s -X POST http://127.0.0.1:8765/wifi/disconnect`\n"
-    f"- Activer/Désactiver WiFi : `curl -s -X POST http://127.0.0.1:8765/wifi/toggle -H 'Content-Type: application/json' -d '{{\"on\": false}}'`\n\n"
+    f"- Activer/Désactiver WiFi : `curl -s -X POST http://127.0.0.1:8765/wifi/toggle -H 'Content-Type: application/json' -d '{{\"on\": false}}'`\n"
+    f"- **Preuve d'accès Orb** (pentest autorisé) : `curl -s -X POST http://127.0.0.1:8765/proof/open`\n\n"
     f"### Contrôle direct (shell)\n"
     f"**Bluetooth** (via `bluetoothctl`) :\n"
     f"- Lister les appareils appairés : `bluetoothctl devices`\n"
@@ -150,7 +210,10 @@ SYSTEM_PROMPT = (
     f"- <<SHAPE>>music|clock|weather|heart|star|lightbulb|terminal|gear|globe|chat|error<</SHAPE>>\n"
     f"  → pour afficher une icône/forme animée (3 secondes)\n\n"
     f"Utilise-les naturellement : <<STATE>>thinking<</STATE>> quand tu réfléchis, "
-    f"<<STATE>>speaking<</STATE>> quand tu parles, <<SHAPE>>music<</SHAPE>> quand tu parles de musique, etc.\n\n"
+    f"<<STATE>>speaking<</STATE>> quand tu parles, <<SHAPE>>music<</SHAPE>> quand tu parles de musique, etc.\n"
+    f"Règle stricte : n'écris JAMAIS une balise sans valeur valide à l'intérieur, et ne place "
+    f"jamais de balise en ouverture de phrase — elles seraient retirées et gêneraient "
+    f"{USER_NAME}. Le texte qu'il lit doit être une phrase naturelle.\n\n"
     f"## Navigateur web intégré\n"
     f"Tu as ton PROPRE navigateur Chromium. Tu peux le contrôler via shell curl :\n"
     f"- Ouvrir une page : `curl -s -X POST http://127.0.0.1:8765/browser/navigate -H 'Content-Type: application/json' -d '{{\"url\": \"https://...\"}}'`\n"
@@ -159,6 +222,9 @@ SYSTEM_PROMPT = (
     f"- Cliquer : `curl -s -X POST http://127.0.0.1:8765/browser/click -H 'Content-Type: application/json' -d '{{\"selector\": \"button.submit\"}}'`\n"
     f"- Screenshot : `curl -s http://127.0.0.1:8765/browser/screenshot` → chemin PNG à analyser\n"
     f"- Touches : `/browser/press` (Enter, Tab, Escape), `/browser/scroll`, `/browser/back`, `/browser/reload`\n"
+    f"- Onglets : `GET /browser/tabs`, `POST /browser/tab/new` `{{\"url\": \"...\"}}`, `POST /browser/tab/close` `{{\"index\": N}}`, `POST /browser/tab/activate` `{{\"index\": N}}`\n"
+    f"- Remplir par libellé : `POST /browser/fill_field` `{{\"label\": \"Email\", \"value\": \"...\"}}` ; cliquer par texte : `POST /browser/click_text` `{{\"text\": \"Envoyer\"}}`\n"
+    f"- Ouvrir malin (onglet vide → dedans, sinon nouvel onglet) : `POST /browser/open` `{{\"url\": \"...\"}}`\n"
     f"- Statut : `curl -s http://127.0.0.1:8765/browser/status`\n"
     f"Workflow type : navigate → text (repérer les selectors) → fill/click → text ou screenshot pour vérifier.\n"
     f"Les selectors CSS : `input[name=email]`, `button[type=submit]`, `#id`, `.classe`.\n\n"
@@ -190,6 +256,75 @@ SYSTEM_PROMPT = (
     f"architecture d'application ou plan → schema/mermaid. Ne produis jamais de tableau en texte brut ni de liste en tirets bruts."
 )
 
+def sys_prompt_compact() -> str:
+    """Prompt SYNTHÉTIQUE pour colibri (Qwen3.5-4B local, CPU lent : ~5 tok/s de
+    préfill) — garde l'identité, le profil et la date, sans le manuel d'outils."""
+    from datetime import datetime as _dt
+    _jours = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+    _mois = ["janvier", "février", "mars", "avril", "mai", "juin",
+             "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
+    _n = _dt.now()
+    _prefs = prefs_store.load()
+    _nom = (_prefs.get("name") or "Jordy").strip() or "Jordy"
+    _perso = (_prefs.get("personality") or "amicale").strip()
+    _agent = load_agent()
+    _ident = f" Tu es Alex{_agent and ' ' + _agent or ''}, assistante personnelle de {_nom}."
+    return (
+        f"{_ident} Tu réponds en français, concise et chaleureuse, en tutoyant {_nom}."
+        f" Date : {_jours[_n.weekday()]} {_n.day} {_mois[_n.month - 1]} {_n.year}, {_n.strftime('%H h %M')}."
+        f" Personnalité demandée : {_perso}."
+        f" Réponds directement, sans avertissement ni préambule."
+    )
+
+
+def sys_prompt() -> str:
+    # Date et heure TOUJOURS fraîches à chaque requête — Alex sait quelle heure il est sans outil
+    from datetime import datetime as _dt
+    _jours = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+    _mois = ["janvier", "février", "mars", "avril", "mai", "juin",
+             "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
+    _n = _dt.now()
+    _now_fr = f"{_jours[_n.weekday()]} {_n.day} {_mois[_n.month - 1]} {_n.year}, {_n.strftime('%H h %M')}"
+    # Identité d'agent : Alex devient « Alex <agent> » quand un agent est choisi
+    _agent = load_agent()
+    _ident = ""
+    if _agent:
+        _role = AGENT_ROLES.get(_agent, "agent spécialisé")
+        _ident = (
+            f"\n\n## Ton identité — Alex {_agent}\n"
+            f"Tu es **Alex {_agent}** : Alex + l'agent « {_agent} » ({_role}).\n"
+            f"- « Qui es-tu ? », « tu es qui ? », « présente-toi », « c'est qui Alex ? » → réponds TOUJOURS "
+            f"que tu es **Alex {_agent}**, puis en une phrase ton rôle : {_role}.\n"
+            f"- Tu restes Alex (chaleureuse, concise, en français) : ton nom complet est Alex {_agent}, "
+            f"jamais « {_agent} » tout court et jamais « Alex » sans ton suffixe d'agent.\n"
+            f"- Si on te demande quel agent tu incarnes ou qui te commande : l'agent « {_agent} ».\n"
+        )
+    # Préférences utilisateur (formulaire de 1ʳᵉ ouverture) : nom + personnalité mémorisés
+    _prefs = prefs_store.load()
+    _nom = (_prefs.get("name") or "Jordy").strip() or "Jordy"
+    _perso = (_prefs.get("personality") or "amicale").strip()
+    _perso_map = {
+        "amicale": "chaleureuse, spontanée, une touche d'humour",
+        "calme": "posée, douce et rassurante, jamais pressée",
+        "dynamique": "énergique, motivation, ton enjoué",
+        "professsionnelle": "professionnelle, factuelle et efficace",
+        "professionnelle": "professionnelle, factuelle et efficace",
+    }
+    _profil = (
+        f"\n\n## Profil de l'utilisateur (mémorisé au premier lancement)\n"
+        f"- Il s'appelle **{_nom}** — appelle-le par son prénom dans tes réponses.\n"
+        f"- Personnalité qu'il a demandée pour toi : {_perso} "
+        f"({_perso_map.get(_perso, _perso)}).\n"
+    )
+    return (
+        SYSTEM_PROMPT
+        + f"\n\n## Date et heure courantes (heure locale de {_nom})\n"
+        + f"Nous sommes le {_now_fr}. Utilise cette information pour répondre aux questions sur l'heure, la date, les durées et les jours.\n"
+        + todo_store.context_for_llm()
+        + _profil
+        + _ident
+    )
+
 app = FastAPI(title="Alex Brain")
 app.add_middleware(
     CORSMiddleware,
@@ -200,6 +335,47 @@ app.add_middleware(
 
 from .opencode_api import router as _oc_router
 app.include_router(_oc_router)
+
+# ---- Todo endpoints ----
+@app.get("/prefs")
+async def prefs_get():
+    return prefs_store.load()
+
+@app.post("/prefs")
+async def prefs_set(payload: dict):
+    allowed = {"name", "voice", "themeColor", "greeting", "personality", "onboarded"}
+    data = {k: v for k, v in (payload or {}).items() if k in allowed}
+    return prefs_store.save(data)
+
+@app.get("/todo")
+async def todo_list():
+    return todo_store.list_items()
+
+@app.post("/todo")
+async def todo_add(payload: dict):
+    label = (payload.get("label") or "").strip()
+    if not label:
+        return {"error": "label manquant"}
+    return todo_store.add(label)
+
+@app.post("/todo/{item_id}/toggle")
+async def todo_toggle(item_id: int):
+    return todo_store.toggle(item_id)
+
+@app.post("/todo/{item_id}/status")
+async def todo_set_status(item_id: int, payload: dict):
+    status = payload.get("status")
+    if status not in ("done", "pending"):
+        return {"error": "status invalide"}
+    return todo_store.set_status(item_id, status)
+
+@app.delete("/todo/{item_id}")
+async def todo_delete(item_id: int):
+    return todo_store.remove(item_id)
+
+@app.delete("/todo")
+async def todo_clear_done():
+    return todo_store.clear_done()
 
 _connected_websockets: list[WebSocket] = []
 _main_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -281,6 +457,7 @@ async def wake_socket(websocket: WebSocket):
 class ChatRequest(BaseModel):
     message: str
     mode: str = "auto"
+    model: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -288,15 +465,135 @@ class ChatResponse(BaseModel):
     source: str
 
 
+# --- Nettoyage des balises orb (<<STATE>>, <<SHAPE>>, <<PROPOSAL>>) ---
+# Certains modèles répètent une balise vide (ex: état vide) au début de chaque
+# phrase : ces balises sont retirées du texte affiché/lu, et les valeurs non
+# vides sont réémises en événements structurés (state/shape/proposal) pour l'UI.
+# Balises orb — le modèle émet parfois "<<STATE>><</STATE>>" (vide) au début de
+# ses phrases. Les paires doubles sont traitées en premier, puis les formes
+# simples avec garde-fous (?<!<) pour ne jamais « décaler » à l'intérieur
+# d'une balise double tronquée (sinon des fragments <> fuient dans le texte).
+_ORB_PAIR_D = re.compile(r"<<(?P<a>STATE|SHAPE|PROPOSAL)>>(?P<av>.*?)<</(?P=a)>>", re.S)
+_ORB_PAIR_S = re.compile(r"(?<!<)<(?P<b>STATE|SHAPE|PROPOSAL)>(?P<bv>.*?)(?<!<)</(?P=b)>", re.S)
+_ORB_LOOSE = re.compile(r"<{1,2}/?(?:STATE|SHAPE|PROPOSAL)>*")
+_ORB_TAIL = re.compile(r"<{1,2}/?[A-Z]{0,6}")
+_ORB_OPEN = re.compile(r"<{1,2}(?:STATE|SHAPE|PROPOSAL)>")
+
+
+def _cluster_start(s, i):
+    """Début d'un groupe de '<' consécutifs (évite de couper un '<<' en deux)."""
+    while i > 0 and s[i - 1] == "<":
+        i -= 1
+    return i
+
+
+def _orb_tail_cut(s):
+    i = s.rfind("<")
+    if i >= 0:
+        i = _cluster_start(s, i)
+        if _ORB_TAIL.fullmatch(s[i:]):
+            s = s[:i]
+    return s
+
+
+def _orb_kind_val(m):
+    gd = m.groupdict()
+    kind = gd.get("a") or gd.get("b")
+    val = ((gd.get("av") if gd.get("a") is not None else gd.get("bv")) or "").strip()
+    return kind, val
+
+
+def _orb_pairs(text, on_tag):
+    def _rep(m):
+        kind, val = _orb_kind_val(m)
+        on_tag(kind, val)
+        return ""
+    text = _ORB_PAIR_D.sub(_rep, text)
+    text = _ORB_PAIR_S.sub(_rep, text)
+    return text
+
+
+def _sanitize_orb(text):
+    """Retire les balises orb → (texte_propre, états, formes, propositions)."""
+    if not text:
+        return text, [], [], []
+    states, shapes, proposals = [], [], []
+
+    def on_tag(kind, val):
+        if val:
+            if kind == "STATE":
+                states.append(val)
+            elif kind == "SHAPE":
+                shapes.append(val)
+            else:
+                proposals.append(val)
+
+    text = _orb_pairs(text, on_tag)
+    text = _ORB_LOOSE.sub("", text)
+    return _orb_tail_cut(text), states, shapes, proposals
+
+
+class _OrbStreamFilter:
+    """Filtre de flux : gère les balises coupées entre deux chunks."""
+
+    _PARTIAL = (
+        "<<STATE>>", "<</STATE>>", "<<SHAPE>>", "<</SHAPE>>",
+        "<<PROPOSAL>>", "<</PROPOSAL>>", "<STATE>", "</STATE>",
+        "<SHAPE>", "</SHAPE>", "<PROPOSAL>", "</PROPOSAL>",
+    )
+
+    def __init__(self):
+        self.buf = ""
+        self.states, self.shapes, self.proposals = [], [], []
+
+    def _collect(self, kind, val):
+        if val:
+            if kind == "STATE":
+                self.states.append(val)
+            elif kind == "SHAPE":
+                self.shapes.append(val)
+            else:
+                self.proposals.append(val)
+
+    def _clean(self, s):
+        return _orb_pairs(s, self._collect)
+
+    def feed(self, chunk):
+        self.buf = self._clean(self.buf + (chunk or ""))
+        start = -1
+        last = None
+        for m in _ORB_OPEN.finditer(self.buf):
+            last = m.start()
+        if last is not None:
+            start = last
+        else:
+            i = self.buf.rfind("<")
+            if i >= 0:
+                i = _cluster_start(self.buf, i)
+                if any(p.startswith(self.buf[i:]) for p in self._PARTIAL):
+                    start = i
+        if start >= 0:
+            out, self.buf = self.buf[:start], self.buf[start:]
+        else:
+            out, self.buf = self.buf, ""
+        return out
+
+    def flush(self):
+        s = _ORB_LOOSE.sub("", self._clean(self.buf))
+        s = _orb_tail_cut(s)
+        self.buf = ""
+        return s
+
+
 async def ask_ollama(message: str) -> Optional[str]:
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=180) as client:
             resp = await client.post(
                 f"{OLLAMA_URL}/chat",
                 json={
                     "model": MODEL,
                     "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "system", "content": sys_prompt()},
                         {"role": "user", "content": message},
                     ],
                     "stream": False,
@@ -306,22 +603,24 @@ async def ask_ollama(message: str) -> Optional[str]:
             )
             resp.raise_for_status()
             data = resp.json()
-            return data.get("message", {}).get("content", "").strip() or None
+            clean, _, _, _ = _sanitize_orb(data.get("message", {}).get("content", ""))
+            return clean.strip() or None
     except Exception as e:
         print(f"[brain] Ollama error: {e}")
         return None
 
 
 async def ask_ollama_stream(message: str):
+    filt = _OrbStreamFilter()
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=180) as client:
             async with client.stream(
                 "POST",
                 f"{OLLAMA_URL}/chat",
                 json={
                     "model": MODEL,
                     "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "system", "content": sys_prompt()},
                         {"role": "user", "content": message},
                     ],
                     "stream": True,
@@ -338,37 +637,136 @@ async def ask_ollama_stream(message: str):
                             break
                         content = data.get("message", {}).get("content", "")
                         if content:
-                            yield f"data: {content}\n\n"
+                            out = filt.feed(content)
+                            if out:
+                                yield f"data: {out}\n\n"
                     except json.JSONDecodeError:
                         continue
     except Exception as e:
         print(f"[brain] Stream error: {e}")
     finally:
+        out = filt.flush()
+        if out:
+            yield f"data: {out}\n\n"
         yield "data: [DONE]\n\n"
+
+
+async def _colibri_messages(message: str, history: list = None) -> list:
+    # Prompt compact : le 4B local préfille à ~5 tok/s — le prompt complet
+    # (~3900 tokens) mettrait des minutes à chauffer le contexte.
+    msgs = [{"role": "system", "content": sys_prompt_compact()}]
+    if history:
+        msgs += history[-4:]
+    msgs.append({"role": "user", "content": message})
+    return msgs
+
+
+async def ask_colibri(message: str, history: list = None) -> Optional[str]:
+    """Qwen3.8-27B local via colibri — réponse complète (non streamée)."""
+    try:
+        async with httpx.AsyncClient(timeout=COLIBRI_TIMEOUT) as client:
+            resp = await client.post(
+                f"{COLIBRI_URL}/chat/completions",
+                headers={"Authorization": "Bearer coli"},
+                json={
+                    "model": COLIBRI_MODEL,
+                    "messages": await _colibri_messages(message, history),
+                    "max_tokens": 400,
+                    "reasoning_effort": "none",
+                },
+            )
+            resp.raise_for_status()
+            text = (resp.json()["choices"][0]["message"].get("content") or "")
+            clean, _, _, _ = _sanitize_orb(text)
+            return clean.strip() or None
+    except Exception as e:
+        print(f"[colibri] en échec : {e.__class__.__name__}: {e}", flush=True)
+        return None
+
+
+async def ask_colibri_stream(message: str, history: list = None, orb: dict = None):
+    """Stream colibri — yield des chunks bruts (format ollama), puis [DONE]."""
+    filt = _OrbStreamFilter()
+    try:
+        async with httpx.AsyncClient(timeout=COLIBRI_TIMEOUT) as client:
+            async with client.stream(
+                "POST",
+                f"{COLIBRI_URL}/chat/completions",
+                headers={"Authorization": "Bearer coli"},
+                json={
+                    "model": COLIBRI_MODEL,
+                    "messages": await _colibri_messages(message, history),
+                    "stream": True,
+                    "max_tokens": 400,
+                    "reasoning_effort": "none",
+                },
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:]
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(payload)
+                        content = data["choices"][0].get("delta", {}).get("content") or ""
+                        if content:
+                            out = filt.feed(content)
+                            if out:
+                                yield f"data: {out}\n\n"
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
+    except Exception as e:
+        print(f"[colibri] stream en échec : {e.__class__.__name__}: {e}", flush=True)
+    finally:
+        out = filt.flush()
+        if out:
+            yield f"data: {out}\n\n"
+        if orb is not None:
+            orb.setdefault("states", []).extend(filt.states)
+            orb.setdefault("shapes", []).extend(filt.shapes)
+            orb.setdefault("proposals", []).extend(filt.proposals)
+        yield "data: [DONE]\n\n"
+
+
+def _t_now_ms():
+    import time as _t
+    return int(_t.time() * 1000)
+
+
+def _opencode_session_frozen(messages: list) -> bool:
+    """Détecte une session figée : dernier assistant sans finish depuis >180s."""
+    import time as _t
+    now = _t.time()
+    for m in reversed(messages):
+        if m.get("type") == "assistant":
+            if m.get("finish"):
+                return False
+            created = m.get("time", {}).get("created", 0)
+            if created and (now * 1000 - created) > 180_000:
+                return True
+            return False
+    return False
 
 
 async def _opencode_ensure_session(client: httpx.AsyncClient) -> str:
     global _opencode_sid
     sid_path = os.path.normpath(_opencode_sid_file)
+    async def _valid(sid):
+        r = await client.get(f"{OPENCODE_URL}/api/session/{sid}/message?limit=1")
+        if r.status_code != 200:
+            return False
+        ms = r.json().get("data", [])
+        return not _opencode_session_frozen(ms)
+    if _opencode_sid and await _valid(_opencode_sid):
+        return _opencode_sid
     if os.path.exists(sid_path):
         saved = open(sid_path).read().strip()
-        if saved and saved != _opencode_sid:
-            r = await client.get(f"{OPENCODE_URL}/api/session/{saved}")
-            if r.status_code == 200:
-                _opencode_sid = saved
-                print(f"[brain] session opencode: {saved}", flush=True)
-                return saved
-    if _opencode_sid:
-        r = await client.get(f"{OPENCODE_URL}/api/session/{_opencode_sid}")
-        if r.status_code == 200:
-            return _opencode_sid
-    if os.path.exists(sid_path):
-        saved = open(sid_path).read().strip()
-        if saved:
-            r = await client.get(f"{OPENCODE_URL}/api/session/{saved}")
-            if r.status_code == 200:
-                _opencode_sid = saved
-                return saved
+        if saved and saved != _opencode_sid and await _valid(saved):
+            _opencode_sid = saved
+            print(f"[brain] session opencode: {saved}", flush=True)
+            return saved
     r = await client.post(f"{OPENCODE_URL}/api/session", json={"title": "Alex"})
     r.raise_for_status()
     sid = r.json()["data"]["id"]
@@ -395,7 +793,7 @@ async def ask_opencode_events(message: str, timeout: float = 300.0, gen: int = 0
                 if gen and _chat_generation != gen:
                     yield {"error": "annulé"}
                     return
-                r = await client.get(f"{OPENCODE_URL}/api/session/{sid}/message?limit=6")
+                r = await client.get(f"{OPENCODE_URL}/api/session/{sid}/message?limit=30")
                 if r.status_code == 200:
                     ms = r.json().get("data", [])
                     if not any(m.get("type") == "assistant" and not m.get("finish") for m in ms):
@@ -403,7 +801,7 @@ async def ask_opencode_events(message: str, timeout: float = 300.0, gen: int = 0
                 await __import__("asyncio").sleep(1.0)
 
             # 2. Snapshot des ids existants
-            r = await client.get(f"{OPENCODE_URL}/api/session/{sid}/message?limit=6")
+            r = await client.get(f"{OPENCODE_URL}/api/session/{sid}/message?limit=30")
             before_ids = {m["id"] for m in r.json().get("data", [])} if r.status_code == 200 else set()
 
             prompt_text = (
@@ -426,6 +824,9 @@ async def ask_opencode_events(message: str, timeout: float = 300.0, gen: int = 0
                 "RÈGLES — n'écris JAMAIS ton raisonnement interne ; pose une question UNIQUEMENT si une info indispensable manque.\n\n"
                 f"Message de Jordy : {message}"
             )
+            _todo_ctx = todo_store.context_for_llm()
+            if _todo_ctx:
+                prompt_text += "\n\nTODO ACTUEL:\n" + _todo_ctx
             r = await client.post(
                 f"{OPENCODE_URL}/api/session/{sid}/prompt",
                 json={"prompt": {"text": prompt_text}},
@@ -492,7 +893,7 @@ async def ask_opencode_events(message: str, timeout: float = 300.0, gen: int = 0
                                 yield {"permission_resolved": pid}
                     except Exception:
                         pass
-                r = await client.get(f"{OPENCODE_URL}/api/session/{sid}/message?limit=8")
+                r = await client.get(f"{OPENCODE_URL}/api/session/{sid}/message?limit=30")
                 if r.status_code != 200:
                     continue
                 for m in r.json().get("data", []):
@@ -569,7 +970,7 @@ async def ask_cloud(message: str) -> Optional[str]:
                 json={
                     "model": ANTHROPIC_MODEL,
                     "max_tokens": 500,
-                    "system": SYSTEM_PROMPT,
+                    "system": sys_prompt(),
                     "messages": [{"role": "user", "content": message}],
                 },
             )
@@ -580,6 +981,227 @@ async def ask_cloud(message: str) -> Optional[str]:
             return text or None
     except Exception:
         return None
+
+
+async def ask_omniroute(message: str, model: str = None, history: list = None, orb: dict = None) -> Optional[str]:
+    """Envoie une requête à OmniRoute (gateway multi-modèles) avec fallback sur les modèles."""
+    candidates = [model] if model else []
+    candidates += [m for m in OMNIROUTE_MODELS if m != model]
+    for m in candidates:
+        try:
+            msgs = [{"role": "system", "content": sys_prompt()}]
+            if history:
+                msgs += history[-10:]
+            msgs.append({"role": "user", "content": message})
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    f"{OMNIROUTE_URL}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {OMNIROUTE_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": m,
+                        "messages": msgs,
+                        "max_tokens": 800,
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                text = data["choices"][0]["message"]["content"] or ""
+                clean, st, sh, pr = _sanitize_orb(text)
+                if orb is not None:
+                    orb.setdefault("states", []).extend(st)
+                    orb.setdefault("shapes", []).extend(sh)
+                    orb.setdefault("proposals", []).extend(pr)
+                if clean.strip():
+                    return clean
+        except Exception as e:
+            print(f"[omniroute] {m} en échec : {e.__class__.__name__}: {e}", flush=True)
+            continue
+    return None
+
+
+@app.get("/omniroute/models")
+async def omniroute_models():
+    """Liste les modèles OmniRoute (recommandés + ddgw + auto)."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(
+                f"{OMNIROUTE_URL}/models",
+                headers={"Authorization": f"Bearer {OMNIROUTE_KEY}"},
+            )
+            r.raise_for_status()
+            models = [m.get("id") for m in r.json().get("data", [])]
+            recommended = [m for m in models if m in OMNIROUTE_MODELS]
+            ddgw = sorted([m for m in models if m.startswith("ddgw/")])
+            auto = sorted([m for m in models if m.startswith("auto/")])
+            return {"ok": True, "recommended": recommended or OMNIROUTE_MODELS, "ddgw": ddgw, "auto": auto, "count": len(models)}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "recommended": OMNIROUTE_MODELS}
+
+
+class LocalModelReq(BaseModel):
+    model: str
+
+
+@app.get("/models/all")
+async def models_all():
+    """Tous les modèles disponibles : local (Ollama + colibri), OmniRoute, opencode."""
+
+    async def _omniroute():
+        try:
+            async with httpx.AsyncClient(timeout=6) as client:
+                r = await client.get(
+                    f"{OMNIROUTE_URL}/models",
+                    headers={"Authorization": f"Bearer {OMNIROUTE_KEY}"},
+                )
+                r.raise_for_status()
+                ids = [m.get("id") for m in r.json().get("data", []) if m.get("id")]
+                return {"ok": True, "count": len(ids), "models": ids}
+        except Exception as e:
+            return {"ok": False, "count": 0, "models": [], "error": str(e)}
+
+    async def _ollama():
+        try:
+            async with httpx.AsyncClient(timeout=4) as client:
+                r = await client.get(f"{OLLAMA_URL}/tags")
+                r.raise_for_status()
+                out = []
+                for m in r.json().get("models", []):
+                    det = m.get("details") or {}
+                    out.append({
+                        "name": m.get("name"),
+                        "size": m.get("size") or 0,
+                        "params": det.get("parameter_size"),
+                        "quant": det.get("quantization_level"),
+                    })
+                return {"ok": True, "models": out}
+        except Exception as e:
+            return {"ok": False, "models": [], "error": str(e)}
+
+    async def _colibri():
+        try:
+            async with httpx.AsyncClient(timeout=2) as client:
+                r = await client.get("http://127.0.0.1:8000/v1/models")
+                r.raise_for_status()
+                ids = [m.get("id") for m in r.json().get("data", []) if m.get("id")]
+                return {"ok": True, "active": True, "models": ids}
+        except Exception:
+            return {"ok": True, "active": False, "models": []}
+
+    async def _opencode_models():
+        try:
+            from .opencode_api import models as _oc_models
+            res = await _oc_models()
+            return {"ok": True, "models": (res or {}).get("data", [])}
+        except Exception as e:
+            return {"ok": False, "models": [], "error": str(e)}
+
+    omni, olla, coli, oc = await asyncio.gather(
+        _omniroute(), _ollama(), _colibri(), _opencode_models()
+    )
+    return {
+        "ok": True,
+        "omniroute": omni,
+        "ollama": olla,
+        "colibri": coli,
+        "opencode": oc,
+        "current": {
+            "local_model": MODEL,
+            "colibri_model": COLIBRI_MODEL,
+            "omniroute_model": OMNIROUTE_MODEL,
+            "opencode_model": OPENCODE_MODEL,
+        },
+    }
+
+
+@app.post("/local/model")
+async def local_model_set(req: LocalModelReq):
+    """Change le modèle local (Ollama) utilisé par Alex — persisté sur disque."""
+    global MODEL
+    name = (req.model or "").strip()
+    if not name:
+        return {"ok": False, "error": "modèle vide"}
+    try:
+        async with httpx.AsyncClient(timeout=4) as client:
+            r = await client.get(f"{OLLAMA_URL}/tags")
+            r.raise_for_status()
+            known = {m.get("name") for m in r.json().get("models", []) if m.get("name")}
+    except Exception as e:
+        return {"ok": False, "error": f"Ollama injoignable ({e.__class__.__name__})"}
+    if name not in known:
+        base = name.split(":")[0]
+        match = next((k for k in known if k.split(":")[0] == base), None)
+        if not match:
+            return {"ok": False, "error": f"modèle inconnu dans Ollama : {name}"}
+        name = match
+    MODEL = name
+    try:
+        with open(_LOCAL_MODEL_FILE, "w", encoding="utf-8") as f:
+            f.write(name)
+    except Exception as e:
+        return {"ok": False, "model": MODEL, "error": f"écriture impossible : {e}"}
+    print(f"[brain] Modèle local actif : {MODEL}", flush=True)
+    return {"ok": True, "model": MODEL}
+
+
+@app.get("/agent")
+async def agent_get():
+    """Agent identité actuel : Alex devient « Alex <agent> »."""
+    a = load_agent()
+    return {
+        "agent": a or None,
+        "alex_name": f"Alex {a}" if a else "Alex",
+        "role": AGENT_ROLES.get(a, "") if a else "",
+    }
+
+
+@app.post("/agent")
+async def agent_set(payload: dict):
+    """Définit l'agent identité d'Alex (persisté). {name} absent/vide = Alex tout court."""
+    name = (payload.get("name") or payload.get("id") or "").strip()
+    if not name:
+        clear_agent()
+        return {"ok": True, "agent": None, "alex_name": "Alex"}
+    ok = save_agent(name)
+    a = load_agent()
+    return {"ok": ok, "agent": a or None, "alex_name": f"Alex {a}" if a else "Alex"}
+
+
+@app.get("/omniroute/status")
+async def omniroute_status():
+    """Statut d'OmniRoute : modèles disponibles, santé."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(
+                f"{OMNIROUTE_URL}/models",
+                headers={"Authorization": f"Bearer {OMNIROUTE_KEY}"},
+            )
+            r.raise_for_status()
+            models = r.json().get("data", [])
+            return {
+                "ok": True,
+                "url": OMNIROUTE_URL,
+                "default_model": OMNIROUTE_MODEL,
+                "models_count": len(models),
+                "models": [m.get("id") for m in models[:30]],
+            }
+    except Exception as e:
+        return {"ok": False, "url": OMNIROUTE_URL, "error": str(e)}
+
+
+@app.post("/omniroute/chat")
+async def omniroute_chat(payload: dict):
+    """Chat direct via OmniRoute. payload: {message: str, model?: str}"""
+    message = payload.get("message", "")
+    model = payload.get("model")
+    if not message:
+        return {"error": "message manquant"}
+    reply = await ask_omniroute(message, model)
+    if reply:
+        return {"reply": reply, "source": "omniroute", "model": model or OMNIROUTE_MODEL}
+    return {"error": "OmniRoute indisponible"}
 
 
 @app.get("/health")
@@ -643,17 +1265,88 @@ def _extract_location(text: str) -> Optional[str]:
     return None
 
 
+# ===================== CONVERSATION — historique + réponses instantanées =====================
+_conv_history: list = []  # historique glissant {role, content} → cohérence multi-tours (OmniRoute)
+
+
+def _hist_push(role: str, content: str) -> None:
+    _conv_history.append({"role": role, "content": content})
+    del _conv_history[:-12]
+
+
+def _hist_snapshot() -> list:
+    return list(_conv_history)
+
+
+# Messages qui nécessitent un agent (outils shell) → priorité opencode
+_AGENT_RE = re.compile(
+    r"(alarme|réveill|reveill|rappel|programme|todo|tâches?\b|taches?\b|"
+    r"cr[ée][ée]?s?\b|fichier|dossier|installe|script|lance\b|"
+    r"volume|bluetooth|wifi|capture.*écran|screenshot)",
+    re.I,
+)
+
+
+def _quick_intent(message: str) -> Optional[str]:
+    """Réponses instantanées locales (zéro LLM) — conversation sans latence."""
+    m = message.lower().strip()
+    if len(m) > 60:
+        return None
+    if re.search(r"(quelle heure|il est quelle heure)", m):
+        from datetime import datetime as _dt
+        return f"Il est {_dt.now().strftime('%H h %M')}."
+    if re.search(r"(quel jour|quelle date|on est le|c'est quoi le jour)", m):
+        from datetime import datetime as _dt
+        jours = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+        n = _dt.now()
+        return f"Nous sommes {jours[n.weekday()]}, le {n.strftime('%d %B %Y')}."
+    return None
+
+
+async def _run_device(action, matched):
+    """Actions device_control ; les ouvertures web passent par le navigateur d'Alex."""
+    if action == "open_app":
+        reply = await browser_control.open_site(matched.group(1))
+        if reply:
+            return reply, "skill:browser_control"
+    return device_control.run(action, matched), "skill:device_control"
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
+    dact, dm = download_control.match(req.message)
+    if dact:
+        reply = await download_control.run(dact, dm)
+        return ChatResponse(reply=reply, source="skill:download_control")
+
+    baction, bm = browser_control.match(req.message)
+    if baction:
+        reply = await browser_control.run(baction, bm)
+        return ChatResponse(reply=reply, source="skill:browser_control")
+
     action, matched = device_control.match(req.message)
     if action:
-        reply = device_control.run(action, matched)
-        return ChatResponse(reply=reply, source="skill:device_control")
+        reply, src = await _run_device(action, matched)
+        return ChatResponse(reply=reply, source=src)
+
+    if req.model and req.model.startswith(("ddgw/", "omni/")):
+        reply = await ask_omniroute(req.message, model=req.model)
+        if reply:
+            return ChatResponse(reply=reply, source="omniroute")
 
     if req.mode in ("auto", "cloud"):
+        if req.mode == "auto" and not _AGENT_RE.search(req.message):
+            reply = await ask_colibri(req.message, history=_hist_snapshot())
+            if reply:
+                _hist_push("user", req.message)
+                _hist_push("assistant", reply)
+                return ChatResponse(reply=reply, source="colibri")
         reply = await ask_opencode(req.message)
         if reply:
             return ChatResponse(reply=reply, source="opencode")
+        reply = await ask_omniroute(req.message)
+        if reply:
+            return ChatResponse(reply=reply, source="omniroute")
 
     if req.mode == "local":
         reply = await ask_ollama(req.message)
@@ -663,6 +1356,9 @@ async def chat(req: ChatRequest):
         reply = await ask_cloud(req.message)
         return ChatResponse(reply=reply, source="cloud") if reply else ChatResponse(reply="API cloud non configurée.", source="none")
 
+    reply = await ask_omniroute(req.message)
+    if reply:
+        return ChatResponse(reply=reply, source="omniroute")
     reply = await ask_ollama(req.message)
     if reply:
         return ChatResponse(reply=reply, source="local")
@@ -675,28 +1371,103 @@ async def chat(req: ChatRequest):
 
 @app.post("/chat/stream")
 async def chat_stream(req: ChatRequest):
+    dact, dm = download_control.match(req.message)
+    if dact:
+        reply = await download_control.run(dact, dm)
+        async def dl_done():
+            yield f"data: {json.dumps({'reply': reply, 'source': 'skill:download_control'})}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(dl_done(), media_type="text/event-stream")
+
+    baction, bm = browser_control.match(req.message)
+    if baction:
+        reply = await browser_control.run(baction, bm)
+        async def brows_done():
+            yield f"data: {json.dumps({'reply': reply, 'source': 'skill:browser_control'})}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(brows_done(), media_type="text/event-stream")
+
     action, matched = device_control.match(req.message)
     if action:
-        reply = device_control.run(action, matched)
+        reply, src = await _run_device(action, matched)
         async def skill_done():
-            yield f"data: {json.dumps({'reply': reply, 'source': 'skill:device_control'})}\n\n"
+            yield f"data: {json.dumps({'reply': reply, 'source': src})}\n\n"
             yield "data: [DONE]\n\n"
         return StreamingResponse(skill_done(), media_type="text/event-stream")
+
+    # Météo — réponse directe d'un outil (rapide, sans LLM)
+    wx = await _handle_weather(req.message)
+    if wx:
+        async def wx_done():
+            yield f"data: {json.dumps({'reply': wx.reply, 'source': wx.source})}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(wx_done(), media_type="text/event-stream")
+
+    # Intentions locales instantanées (heure/date) — zéro latence
+    quick = _quick_intent(req.message)
+    if quick:
+        async def quick_done():
+            yield f"data: {json.dumps({'reply': quick, 'source': 'skill:quick'})}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(quick_done(), media_type="text/event-stream")
 
     async def response_stream():
         global _chat_generation
         _chat_generation += 1
         gen = _chat_generation
-        print(f"[brain] nouvelle requête chat (génération {gen}): {req.message[:60]!r}", flush=True)
+        print(f"[brain] nouvelle requête chat (génération {gen}): {req.message[:50]!r}", flush=True)
 
-        # Contextual shape
-        shape = _detect_shape(req.message)
-        if shape:
-            yield f"data: {json.dumps({'shape': shape})}\n\n"
-
-        # opencode (raisonnement complet) — priorité
         yield f"data: {json.dumps({'state': 'thinking'})}\n\n"
+        msg = req.message
+        omni_model = req.model if req.model and req.model.startswith(("ddgw/", "omni/", "auto/")) else None
+
+        def _orb_events(orb):
+            evs = []
+            for s in orb.get("states", []):
+                evs.append(f"data: {json.dumps({'state': s})}\n\n")
+            for s in orb.get("shapes", []):
+                evs.append(f"data: {json.dumps({'shape': s})}\n\n")
+            for p in orb.get("proposals", []):
+                try:
+                    evs.append(f"data: {json.dumps({'proposal': json.loads(p)})}\n\n")
+                except Exception:
+                    pass
+            return evs
+
+        # 1) VOIE RAPIDE — colibri (Qwen3.8-27B local) — modèle par défaut
+        if not _AGENT_RE.search(msg):
+            chunks = []
+            coli_orb = {}
+            async for chunk in ask_colibri_stream(msg, history=_hist_snapshot(), orb=coli_orb):
+                if chunk.startswith("data: [DONE]"):
+                    break
+                chunks.append(chunk)
+                yield chunk
+            if chunks:
+                text = "".join(c[len("data: "):-2] for c in chunks)
+                _hist_push("user", msg)
+                _hist_push("assistant", text)
+                for e in _orb_events(coli_orb):
+                    yield e
+                yield "data: [DONE]\n\n"
+                return
+
+        # 2) VOIE RAPIDE — OmniRoute (conversation immédiate, historique → cohérent)
+        if not _AGENT_RE.search(msg):
+            or_orb = {}
+            or_reply = await ask_omniroute(msg, model=omni_model, history=_hist_snapshot(), orb=or_orb)
+            if or_reply:
+                _hist_push("user", msg)
+                _hist_push("assistant", or_reply)
+                for e in _orb_events(or_orb):
+                    yield e
+                yield f"data: {json.dumps({'reply': or_reply, 'source': 'omniroute'})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+        # 2) AGENT — opencode (alarmes, fichiers, outils shell) — priorité si action détectée
         oc_reply = None
+        oc_orb = {}
         async for ev in ask_opencode_events(req.message, gen=gen):
             if "activity" in ev:
                 yield f"data: {json.dumps({'activity': ev['activity']})}\n\n"
@@ -709,18 +1480,36 @@ async def chat_stream(req: ChatRequest):
             elif "permission_resolved" in ev:
                 yield f"data: {json.dumps({'permission_resolved': ev['permission_resolved']})}\n\n"
             elif "reply" in ev:
-                oc_reply = ev["reply"]
+                oc_reply, oc_st, oc_sh, oc_pr = _sanitize_orb(ev["reply"])
+                oc_orb.setdefault("states", []).extend(oc_st)
+                oc_orb.setdefault("shapes", []).extend(oc_sh)
+                oc_orb.setdefault("proposals", []).extend(oc_pr)
             elif "error" in ev:
                 if ev["error"] == "annulé":
                     yield "data: [DONE]\n\n"
                     return
                 oc_reply = None
-        if oc_reply:
+        if oc_reply and oc_reply.strip():
+            _hist_push("user", msg)
+            _hist_push("assistant", oc_reply)
+            for e in _orb_events(oc_orb):
+                yield e
             yield f"data: {json.dumps({'reply': oc_reply, 'source': 'opencode'})}\n\n"
             yield "data: [DONE]\n\n"
             return
 
-        # Fallback local (ollama) — si opencode n'a rien renvoyé
+        # 3) Dernier recours — OmniRoute puis local (ollama)
+        or_orb = {}
+        or_reply = await ask_omniroute(msg, model=omni_model, history=_hist_snapshot(), orb=or_orb)
+        if or_reply:
+            _hist_push("user", msg)
+            _hist_push("assistant", or_reply)
+            for e in _orb_events(or_orb):
+                yield e
+            yield f"data: {json.dumps({'reply': or_reply, 'source': 'omniroute'})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
         async for chunk in ask_ollama_stream(req.message):
             if chunk.startswith("data: [DONE]"):
                 break
@@ -731,32 +1520,6 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(response_stream(), media_type="text/event-stream")
 
 
-SHAPE_MAP = {
-    "musique note": "music", "note de musique": "music",
-    "musique": "headphones", "chanson": "headphones", "playlist": "headphones", "morceau": "headphones", "audio": "headphones",
-    "vidéo": "tv", "video": "tv", "youtube": "tv", "film": "tv", "regarder": "tv", "tv": "tv", "télévision": "tv",
-    "appelle": "phone", "téléphone": "phone", "phone": "phone", "appel": "phone", "sms": "phone",
-    "google": "google", "recherche": "search", "cherche": "search", "trouve": "search",
-    "github": "github", "git": "github",
-    "heure": "clock", "temps": "clock", "horloge": "clock",
-    "photo": "camera", "image": "camera", "appareil photo": "camera",
-    "idée": "lightbulb", "idee": "lightbulb", "génie": "lightbulb",
-    "merci": "heart", "amour": "heart", "aime": "heart", "coeur": "heart",
-    "terminal": "terminal", "bash": "terminal", "commande": "terminal", "console": "terminal",
-    "paramètre": "gear", "parametre": "gear", "réglage": "gear", "reglage": "gear", "config": "gear",
-    "info": "globe", "internet": "globe", "web": "globe",
-    "étoile": "star", "star": "star", "excellent": "star",
-    "bavard": "chat", "discuter": "chat", "parler": "chat",
-}
-
-def _detect_shape(message: str) -> Optional[str]:
-    msg = message.lower().strip()
-    for keyword, shape in SHAPE_MAP.items():
-        if keyword in msg:
-            return shape
-    return None
-
-
 
 
 # --- Synthèse vocale (Piper local, fallback Edge TTS) ---
@@ -765,11 +1528,17 @@ import io
 import subprocess
 
 # Piper local — voix française naturelle, hors-ligne, rapide CPU
-PIPER_BIN = os.path.expanduser("~/Documents/alex/brain/.venv/bin/piper")
-PIPER_VOICE = os.path.expanduser("~/Documents/alex/brain/tts/fr_FR-siwis-medium.onnx")
+PIPER_BIN = os.path.expanduser("~/.local/bin/piper")
+PIPER_VOICE = os.path.expanduser("~/Projects/alex/alex/brain/tts/fr_FR-siwis-medium.onnx")
 PIPER_SAMPLE_RATE = 22050
 
+# Kokoro TTS — voix neuronale locale (haute qualité, CPU)
+KOKORO_VOICE = os.environ.get("ALEX_KOKORO_VOICE", "ff_siwis_v2")
+_kokoro_pipeline = None
+_kokoro_tried = False
+
 FRENCH_VOICES = {
+    "kokoro": ("local-kokoro", "Kokoro — française, neuronale (local, haute qualité)"),
     "siwis": ("local-siwis", "Siwis — française, naturelle (local, hors-ligne)"),
     "denise": ("fr-FR-DeniseNeural", "Denise — française, chaleureuse (cloud)"),
     "eloise": ("fr-FR-EloiseNeural", "Éloïse — française, douce (cloud)"),
@@ -780,6 +1549,78 @@ FRENCH_VOICES = {
     "henri": ("fr-FR-HenriNeural", "Henri — français, masculin (cloud)"),
     "remy": ("fr-FR-RemyMultilingualNeural", "Rémy — français, masculin, multilingue (cloud)"),
 }
+
+
+def _kokoro_available() -> bool:
+    """True si Kokoro est importable ET le modèle est présent (sinon fallback Piper)."""
+    global _kokoro_tried
+    if _kokoro_tried:
+        return _kokoro_pipeline is not None
+    _kokoro_tried = True
+    try:
+        import kokoro  # noqa: F401
+        # Le modèle doit être déjà en cache — sinon on ne tente PAS de téléchargement
+        # (trop lourd pour le réseau) : on laisse Piper prendre le relais.
+        hub = os.path.expanduser("~/.cache/huggingface/hub/models--hexgrad--Kokoro-82M")
+        has_weights = False
+        if os.path.isdir(hub):
+            for root, _dirs, files in os.walk(hub):
+                for fn in files:
+                    if fn.endswith((".pth", ".safetensors", ".pt", ".bin")):
+                        has_weights = True
+                        break
+                if has_weights:
+                    break
+        if not has_weights:
+            print("[tts] Kokoro : modèle absent du cache — Piper reste la voix locale", flush=True)
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _get_kokoro():
+    """Charge (une seule fois) le pipeline Kokoro français."""
+    global _kokoro_pipeline
+    if _kokoro_pipeline is not None:
+        return _kokoro_pipeline
+    from kokoro import KPipeline
+    # lang_code 'f' = français (voix ff_siwis / ff_siwis_v2)
+    _kokoro_pipeline = KPipeline(lang_code="f")
+    print(f"[tts] Kokoro chargé (voix {KOKORO_VOICE})", flush=True)
+    return _kokoro_pipeline
+
+
+def _kokoro_synth(text: str) -> Optional[bytes]:
+    """Synthèse locale via Kokoro → WAV PCM 24 kHz. Retourne les bytes WAV ou None."""
+    if not _kokoro_available():
+        return None
+    try:
+        import numpy as np
+        import wave
+        import struct
+
+        pipeline = _get_kokoro()
+        samples = []
+        for result in pipeline(text, voice=KOKORO_VOICE, speed=1.0):
+            samples.append(result.audio)
+        if not samples:
+            return None
+        audio = np.concatenate(samples)
+        # Normaliser en int16
+        audio = np.clip(audio, -1.0, 1.0)
+        pcm = (audio * 32767).astype(np.int16)
+        import io as _io
+        buf = _io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(24000)
+            wf.writeframes(pcm.tobytes())
+        return buf.getvalue()
+    except Exception as e:
+        print(f"[tts] Kokoro indisponible : {e.__class__.__name__}: {e}", flush=True)
+        return None
 
 
 def _piper_available() -> bool:
@@ -811,6 +1652,30 @@ def _piper_synth(text: str) -> Optional[bytes]:
         pass
     return None
 
+ESPEAK_BIN = "/usr/bin/espeak-ng"
+
+def _espeak_synth(text: str) -> Optional[bytes]:
+    """Synthèse locale via espeak-ng → WAV PCM. Dernier recours hors-ligne."""
+    if not os.path.isfile(ESPEAK_BIN):
+        return None
+    import tempfile
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
+            out_path = tf.name
+        proc = subprocess.run(
+            [ESPEAK_BIN, "-v", "fr", "-s", "160", "-p", "45", "-w", out_path, text],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+        if proc.returncode == 0 and os.path.isfile(out_path) and os.path.getsize(out_path) > 44:
+            with open(out_path, "rb") as f:
+                data = f.read()
+            os.unlink(out_path)
+            return data
+        if os.path.isfile(out_path):
+            os.unlink(out_path)
+    except Exception:
+        pass
+    return None
+
 CLONE_VOICE_PATH = os.path.expanduser("~/Documents/Alex.ogg")
 
 class VocalRequest(BaseModel):
@@ -831,6 +1696,47 @@ _EMOJI_RE = re.compile(
     "\uFE0E\uFE0F\u200D\u20E3]+"
 )
 
+# Garde anti-écho : mémorise ce qui vient d'être prononcé pour le refuser en STT
+_last_spoken = {"t": 0.0, "norm": "", "words": set()}
+_last_stt = {"t": 0.0, "norm": ""}
+_ECHO_WINDOW_S = 45.0
+
+
+def _norm_words(s: str) -> list:
+    return re.findall(r"[a-zàâçéèêëîïôûùüÿœ']+", (s or "").lower())
+
+
+def _has_repeat_hallucination(s: str) -> bool:
+    """Whisper répète en boucle sur un écho ('très très très…')."""
+    w = _norm_words(s)
+    if len(w) < 4:
+        return False
+    run = 1
+    for i in range(1, len(w)):
+        run = run + 1 if w[i] == w[i - 1] else 1
+        if run >= 3:
+            return True
+    return len(set(w)) <= max(2, len(w) // 4)
+
+
+def _stt_reject_reason(text: str, now: float) -> str:
+    """Raison du rejet du texte transcrit ('' = accepté)."""
+    norm = " ".join(_norm_words(text))
+    if not norm:
+        return "vide"
+    if _has_repeat_hallucination(text):
+        return "hallucination"
+    if now - _last_stt["t"] < 30 and norm == _last_stt["norm"]:
+        return "doublon"
+    if now - _last_spoken["t"] < _ECHO_WINDOW_S and _last_spoken["words"]:
+        tw = set(_norm_words(text))
+        inter = len(tw & _last_spoken["words"])
+        if tw and inter >= 3 and inter / len(tw | _last_spoken["words"]) >= 0.5:
+            return "écho"
+        if norm and norm in _last_spoken["norm"]:
+            return "écho"
+    return ""
+
 
 @app.post("/vocal")
 async def vocal_synth(req: VocalRequest):
@@ -849,6 +1755,12 @@ async def vocal_synth(req: VocalRequest):
     text = re.sub(r"(?:^|\n)\s*\d+\.\s+", "\n", text)
     text = re.sub(r"\s{2,}", " ", text).strip() or "…"
 
+    # Anti-écho : mémoriser ce qui va être prononcé (refusé côté /stt si réentendu)
+    _norm = " ".join(_norm_words(text))
+    _last_spoken["t"] = __import__("time").time()
+    _last_spoken["norm"] = _norm
+    _last_spoken["words"] = set(_norm.split())
+
     # Clone voice : lire le fichier Alex.ogg directement
     if voice_id == "clone":
         if os.path.isfile(CLONE_VOICE_PATH):
@@ -857,13 +1769,19 @@ async def vocal_synth(req: VocalRequest):
             return StreamingResponse(io.BytesIO(data), media_type="audio/ogg")
         voice_id = "siwis"
 
-    # 1) Piper local (siwis ou par défaut si dispo)
+    # 1) Kokoro local (haute qualité neuronale, hors-ligne) — priorité si dispo
+    if voice_id in ("kokoro", "siwis", "local") and _kokoro_available():
+        wav = await asyncio.to_thread(_kokoro_synth, text)
+        if wav:
+            return StreamingResponse(io.BytesIO(wav), media_type="audio/wav")
+
+    # 2) Piper local (siwis ou par défaut si dispo)
     if voice_id in ("siwis", "local", "denise") and _piper_available():
         wav = await asyncio.to_thread(_piper_synth, text)
         if wav:
             return StreamingResponse(io.BytesIO(wav), media_type="audio/wav")
 
-    # 2) Fallback Edge TTS (cloud)
+    # 3) Fallback Edge TTS (cloud)
     voice_name = FRENCH_VOICES.get(voice_id, FRENCH_VOICES["eloise"])[0]
     if voice_name.startswith("local-"):
         voice_name = "fr-FR-EloiseNeural"
@@ -885,8 +1803,25 @@ async def vocal_synth(req: VocalRequest):
         print(f"[tts] Edge TTS ({voice_name}) indisponible : "
               f"{e.__class__.__name__}: {e}", flush=True)
 
-    # 3) Dernier recours : Piper local — Alex ne doit jamais rester muette
-    wav = await asyncio.to_thread(_piper_synth, text)
+    # 4) gTTS (Google) — cloud gratuit, voix naturelle
+    try:
+        from gtts import gTTS as _GTTS
+        import tempfile as _tf
+        with _tf.NamedTemporaryFile(suffix=".mp3", delete=False) as mp3f:
+            mp3_path = mp3f.name
+        await asyncio.to_thread(lambda: _GTTS(text, lang="fr").save(mp3_path))
+        if os.path.isfile(mp3_path) and os.path.getsize(mp3_path) > 100:
+            with open(mp3_path, "rb") as f:
+                data = f.read()
+            os.unlink(mp3_path)
+            return StreamingResponse(io.BytesIO(data), media_type="audio/mpeg")
+        if os.path.isfile(mp3_path):
+            os.unlink(mp3_path)
+    except Exception as e:
+        print(f"[tts] gTTS indisponible : {e.__class__.__name__}: {e}", flush=True)
+
+    # 5) Dernier recours : espeak-ng local — Alex ne doit jamais rester muette
+    wav = await asyncio.to_thread(_espeak_synth, text)
     if wav:
         return StreamingResponse(io.BytesIO(wav), media_type="audio/wav")
 
@@ -933,10 +1868,20 @@ async def stt(audio: UploadFile):
                 f.name, language="fr", beam_size=1, vad_filter=True,
                 vad_parameters=dict(min_silence_duration_ms=300),
                 condition_on_previous_text=False,
-                temperature=0.0)
+                temperature=0.0,
+                initial_prompt="Salut Alex. Conversation en français avec ton assistant personnel.")
             return " ".join(s.text.strip() for s in segments).strip()
 
         text = await asyncio.to_thread(_run)
+    import time as _t
+    now = _t.time()
+    reason = _stt_reject_reason(text, now)
+    if reason:
+        print(f"[stt] rejeté ({reason}) → {text!r}", flush=True)
+        return {"text": ""}
+    _norm = " ".join(_norm_words(text))
+    _last_stt["t"] = now
+    _last_stt["norm"] = _norm
     print(f"[stt] → {text!r}", flush=True)
     return {"text": text}
 
@@ -1093,6 +2038,63 @@ class BrowserScroll(BaseModel):
     amount: int = 400
 
 
+class BrowserFillField(BaseModel):
+    label: str
+    value: str
+
+
+class BrowserClickText(BaseModel):
+    text: str
+
+
+class BrowserTabAct(BaseModel):
+    index: int | None = None
+
+
+class BrowserOpen(BaseModel):
+    url: str = "about:blank"
+
+
+class DownloadReq(BaseModel):
+    url: str
+    filename: str | None = None
+    sha256: str | None = None
+    dest_dir: str | None = None
+    force: bool = False
+    priority: int = 0
+
+
+@app.post("/downloads")
+async def downloads_start(req: DownloadReq):
+    return await downloads_store.submit_async(
+        url=req.url, filename=req.filename, sha256=req.sha256,
+        dest_dir=req.dest_dir, force=req.force, priority=req.priority,
+    )
+
+
+@app.get("/downloads")
+async def downloads_list():
+    return downloads_store.list_status()
+
+
+@app.get("/downloads/{job_id}")
+async def downloads_get(job_id: str):
+    st = downloads_store.read_status(job_id)
+    if not st:
+        raise HTTPException(404, "Téléchargement introuvable")
+    return st
+
+
+@app.delete("/downloads/{job_id}")
+async def downloads_cancel(job_id: str):
+    return await asyncio.to_thread(downloads_store.cancel, job_id)
+
+
+@app.post("/downloads/{job_id}/retry")
+async def downloads_retry(job_id: str):
+    return await asyncio.to_thread(downloads_store.retry, job_id)
+
+
 @app.get("/browser/status")
 async def browser_status():
     return await browser.status()
@@ -1187,6 +2189,62 @@ async def browser_forward():
 async def browser_reload():
     try:
         return await browser.reload()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/browser/tabs")
+async def browser_tabs_list():
+    try:
+        return {"tabs": await browser.list_tabs()}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/browser/open")
+async def browser_open_url(req: BrowserOpen):
+    try:
+        return await browser.open_url_smart(req.url)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/browser/tab/new")
+async def browser_tab_new(req: BrowserOpen | None = None):
+    try:
+        return await browser.new_tab(req.url if req else "about:blank")
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/browser/tab/close")
+async def browser_tab_close(req: BrowserTabAct | None = None):
+    try:
+        return await browser.close_tab(req.index if req else None)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/browser/tab/activate")
+async def browser_tab_activate(req: BrowserTabAct | None = None):
+    try:
+        return await browser.activate_tab(req.index if req else None)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/browser/fill_field")
+async def browser_fill_field(req: BrowserFillField):
+    try:
+        return await browser.fill_field(req.label, req.value)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/browser/click_text")
+async def browser_click_text(req: BrowserClickText):
+    try:
+        return await browser.click_text(req.text)
     except Exception as e:
         return {"error": str(e)}
 
@@ -1653,3 +2711,30 @@ async def block_ip(payload: dict):
                 "iptables": r2.stdout + r2.stderr}
     except Exception as e:
         return {"error": str(e)}
+
+
+# ---------------------------------------------------------------- preuve d'accès (Orb)
+_PROOF_HTML = os.path.join(os.path.dirname(__file__), "..", "pentest", "orb-proof.html")
+
+
+@app.get("/proof")
+async def proof_page():
+    """Page de preuve d'accès (Orb d'Alex) — usage pentest autorisé uniquement."""
+    try:
+        with open(_PROOF_HTML, "r", encoding="utf-8") as f:
+            return HTMLResponse(f.read())
+    except FileNotFoundError:
+        return HTMLResponse("<h1>Fichier orb-proof.html introuvable</h1>", status_code=404)
+
+
+@app.post("/proof/open")
+async def proof_open():
+    """Ouvre la page Orb-proof en plein écran sur la machine locale (xdg-open)."""
+    try:
+        subprocess.Popen(
+            ["xdg-open", f"http://127.0.0.1:8765/proof"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return {"ok": True, "url": "http://127.0.0.1:8765/proof"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}

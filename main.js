@@ -78,7 +78,7 @@ function setMode(newMode){
   mode = newMode;
   prevBounds = null; // invalide un éventuel état plein écran en attente
   animateTo(target);
-  if(alwaysOnTopEnabled) win.setAlwaysOnTop(true, 'screen-saver');
+  if(alwaysOnTopEnabled) win.setAlwaysOnTop(true, 'floating');
   win.webContents.send('mode-changed', mode);
 }
 
@@ -102,13 +102,24 @@ function createWindow(){
   });
 
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  win.on('blur', ()=> { if(alwaysOnTopEnabled && !win.isDestroyed()){ win.setAlwaysOnTop(true, 'screen-saver'); win.moveTop(); } });
+  win.on('blur', ()=> {
+    if(!alwaysOnTopEnabled || win.isDestroyed()) return;
+    // Xwayland : ré-appliquer alwaysOnTop pendant le blur crée un combat de focus → différé
+    setTimeout(()=>{
+      if(win && !win.isDestroyed() && !win.isFocused() && alwaysOnTopEnabled) win.setAlwaysOnTop(true, 'floating');
+    }, 250);
+  });
   win.loadFile('index.html');
+  // Synchronise le renderer avec le mode réel au chargement (évite classes HTML en dur désynchronisées)
+  win.webContents.on('did-finish-load', ()=>{
+    if(win && !win.isDestroyed()) win.webContents.send('mode-changed', mode);
+  });
 
-  setInterval(()=>{
-    if(alwaysOnTopEnabled && !win.isDestroyed()) win.setAlwaysOnTop(true, 'screen-saver');
-  }, 3000);
-
+  ipcMain.on('force-focus', ()=> {
+    if(win && !win.isDestroyed() && !win.isFocused()){
+      win.focus();
+    }
+  });
   ipcMain.on('set-mode', (event, newMode)=> {
     setMode(newMode);
   });
@@ -126,7 +137,7 @@ function setAlwaysOnTop(next){
   const target = next !== false;
   if(target !== alwaysOnTopEnabled){
     alwaysOnTopEnabled = target;
-    if(win && !win.isDestroyed()) win.setAlwaysOnTop(alwaysOnTopEnabled, 'screen-saver');
+    if(win && !win.isDestroyed()) win.setAlwaysOnTop(alwaysOnTopEnabled, 'floating');
     rebuildMenus();
   }
   alexConfig.write({ alwaysOnTop: alwaysOnTopEnabled });
@@ -180,7 +191,7 @@ ipcMain.on('show-context-menu', (event)=> {
 });
 
 ipcMain.on('keep-top', ()=> {
-  if(alwaysOnTopEnabled && !win.isDestroyed()) win.setAlwaysOnTop(true, 'screen-saver');
+  if(alwaysOnTopEnabled && !win.isDestroyed()) win.setAlwaysOnTop(true, 'floating');
 });
 
 /* Info expand — agrandit temporairement l'îlot pour afficher heure/date/météo */
@@ -269,7 +280,7 @@ ipcMain.on('orb-ready', ()=>{
 
 /* Drag de l'orb du bureau */
 ipcMain.on('orb-drag-start', ()=>{
-  if(orbWin && !orbWin.isDestroyed()) orbWin.setAlwaysOnTop(true, 'screen-saver');
+  if(orbWin && !orbWin.isDestroyed()) orbWin.setAlwaysOnTop(true, 'floating');
 });
 ipcMain.on('orb-drag-move', (event, dx, dy)=>{
   if(orbWin && !orbWin.isDestroyed()){
@@ -393,7 +404,9 @@ ipcMain.on('settings-updated', (event, config)=>{
 --------------------------------------------------------------------- */
 let brainProcess = null;
 function startBrain(){
-  const brainPath = require('path').join(__dirname, 'brain', '.venv', 'bin', 'python3');
+  const _fs = require('fs');
+  let brainPath = require('path').join(__dirname, 'brain', '.venv', 'bin', 'python3');
+  if(!_fs.existsSync(brainPath)) brainPath = 'python3';
   brainProcess = spawn(
     brainPath,
     ['-m', 'uvicorn', 'brain.main:app', '--host', '127.0.0.1', '--port', '8765'],
@@ -408,13 +421,15 @@ function stopBrain(){
 }
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+app.commandLine.appendSwitch('remote-debugging-port', '9226');
+app.commandLine.appendSwitch('remote-allow-origins', '*');
 
 // Instance unique : relancer depuis le menu focus la fenêtre existante.
 if(!app.requestSingleInstanceLock()){
   app.quit();
 } else {
   app.on('second-instance', ()=>{
-    if(win && !win.isDestroyed()){ win.show(); win.moveTop(); }
+    if(win && !win.isDestroyed()){ win.show(); win.focus(); }
   });
 }
 

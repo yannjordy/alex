@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export ALEX_LOCAL_MODEL="${ALEX_LOCAL_MODEL:-smollm:135m}"
+export ALEX_LOCAL_MODEL="${ALEX_LOCAL_MODEL:-qwen27b-cyber}"
+export ALEX_BROWSER="${ALEX_BROWSER:-thorium-browser}"
+export ALEX_COLIBRI_MODEL="${ALEX_COLIBRI_MODEL:-qwen3.6-colibri}"
 
-cd /home/jordy/Documents/alex
+cd /home/jordy/Projects/alex/alex-prioritaire
 
 # S'assurer qu'Ollama tourne
 if ! curl -sf http://127.0.0.1:11434/api/tags > /dev/null 2>&1; then
@@ -34,7 +36,8 @@ kill $(lsof -ti:8765) 2>/dev/null || true
 sleep 1
 
 # Démarrer le cerveau Python
-brain/.venv/bin/python3 -m uvicorn brain.main:app --host 127.0.0.1 --port 8765 &
+PY="brain/.venv/bin/python3"; [ -x "$PY" ] || PY="$(command -v python3)"
+"$PY" -m uvicorn brain.main:app --host 127.0.0.1 --port 8765 &
 BRAIN_PID=$!
 
 # Attendre que le cerveau soit prêt
@@ -45,5 +48,5 @@ for i in $(seq 1 20); do
   sleep 0.3
 done
 
-# Lancer l'interface Electron
-exec ./node_modules/.bin/electron --no-sandbox --in-process-gpu .
+# Lancer l'interface Electron (CDP sur 9226 pour le pilotage/tests à distance)
+exec ./node_modules/.bin/electron --no-sandbox --in-process-gpu --remote-debugging-port=9226 --remote-allow-origins=* .

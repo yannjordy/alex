@@ -19,6 +19,8 @@ TIMEOUT = httpx.Timeout(20.0, connect=5.0)
 
 router = APIRouter(prefix="/api-oc", tags=["opencode"])
 
+from .agent_state import save_agent  # identité « Alex <agent> » (après changement d'agent)
+
 
 def _sid() -> str:
     try:
@@ -71,6 +73,8 @@ async def status():
         sess = _unwrap(await _get(f"/api/session/{sid}"))
         model = sess.get("model")
         agent = sess.get("agent")
+        if agent:
+            save_agent(agent)  # identité Alex synchronisée (plan/build ignorés)
     except (HTTPException, Exception):
         sid = None
     return {
@@ -178,18 +182,44 @@ async def session_messages(sid: str, limit: int = 200):
 
 # ---------------------------------------------------------------- modèles / agents
 
+import json as _json
+_CONFIG_PATH = os.path.expanduser("~/.config/opencode/opencode.json")
+
+def _read_oc_config() -> dict:
+    try:
+        with open(_CONFIG_PATH, "r") as f:
+            return _json.load(f)
+    except Exception:
+        return {}
+
 @router.get("/models")
 async def models():
-    data = _unwrap(await _get("/api/model"))
-    return {"data": [
-        {
-            "id": m.get("id"),
-            "providerID": m.get("providerID"),
-            "name": m.get("name") or m.get("id"),
-            "capabilities": m.get("capabilities"),
-        }
-        for m in data
-    ]}
+    # Lire depuis la config opencode (l'API /api/model est cassée en v1.18)
+    cfg = _read_oc_config()
+    out = []
+    for prov_id, prov in cfg.get("provider", {}).items():
+        for model_id, model in prov.get("models", {}).items():
+            out.append({
+                "id": model_id,
+                "providerID": prov_id,
+                "name": model.get("name") or model_id,
+                "capabilities": model.get("modalities"),
+            })
+    # Ajouter les modèles vus dans les sessions (modèles built-in opencode)
+    try:
+        sessions = _unwrap(await _get("/api/session", params={"limit": 200})) or []
+        for s in sessions:
+            m = s.get("model")
+            if m and not any(x["id"] == m.get("id") and x["providerID"] == m.get("providerID") for x in out):
+                out.append({
+                    "id": m.get("id"),
+                    "providerID": m.get("providerID"),
+                    "name": m.get("id"),
+                    "capabilities": None,
+                })
+    except Exception:
+        pass
+    return {"data": out}
 
 
 class ModelSwitch(BaseModel):
@@ -206,20 +236,63 @@ async def switch_model(body: ModelSwitch):
 
 @router.get("/agents")
 async def agents():
-    data = _unwrap(await _get("/api/agent"))
+    # Lire depuis la config opencode (l'API /api/agent est cassée en v1.18)
+    cfg = _read_oc_config()
+    out = []
+    seen = set()
+    for agent_id, agent in cfg.get("agent", {}).items():
+        out.append({
+            "id": agent_id,
+            "description": (agent.get("description") or "")[:200],
+            "mode": agent.get("mode"),
+            "current": False,
+        })
+        seen.add(agent_id)
+    # Agents locaux : ~/.opencode/agent/*.md (frontmatter YAML)
+    import glob as _glob
+    agent_dir = os.path.expanduser("~/.opencode/agent")
+    for path in _glob.glob(os.path.join(agent_dir, "*.md")):
+        agent_id = os.path.splitext(os.path.basename(path))[0]
+        if agent_id in seen:
+            continue
+        desc, mode = "", None
+        try:
+            with open(path, "r") as f:
+                content = f.read()
+            if content.startswith("---"):
+                fm_end = content.index("---", 3)
+                fm = content[3:fm_end]
+                for line in fm.splitlines():
+                    if line.startswith("description:"):
+                        desc = line.split(":", 1)[1].strip()
+                    elif line.startswith("mode:"):
+                        mode = line.split(":", 1)[1].strip()
+        except Exception:
+            pass
+        out.append({"id": agent_id, "description": desc[:200], "mode": mode, "current": False})
+        seen.add(agent_id)
+    # Agents vus dans les sessions
+    try:
+        sessions = _unwrap(await _get("/api/session", params={"limit": 200})) or []
+        for s in sessions:
+            a = s.get("agent")
+            if a and a not in seen:
+                out.append({"id": a, "description": "", "mode": None, "current": False})
+                seen.add(a)
+    except Exception:
+        pass
+    # Agent courant
     try:
         cur = (_unwrap(await _get(f"/api/session/{_sid()}")) or {}).get("agent")
     except Exception:
         cur = None
-    return {"data": [
-        {
-            "id": a.get("id"),
-            "description": (a.get("description") or "")[:200],
-            "mode": a.get("mode"),
-            "current": a.get("id") == cur,
-        }
-        for a in data if not a.get("hidden")
-    ]}
+    for a in out:
+        a["current"] = a["id"] == cur
+    if cur:
+        save_agent(cur)  # identité Alex synchronisée (plan/build ignorés)
+    # Ne garder que les agents « avec nom » (description) — plan/build/explore/general/vision-* masqués
+    out = [a for a in out if (a.get("description") or "").strip()]
+    return {"data": out}
 
 
 class AgentSwitch(BaseModel):
@@ -228,7 +301,8 @@ class AgentSwitch(BaseModel):
 
 @router.post("/agent")
 async def switch_agent(body: AgentSwitch):
-    await _send("POST", f"/api/session/{_sid()}/agent", json_body={"agentID": body.id})
+    await _send("POST", f"/api/session/{_sid()}/agent", json_body={"agent": body.id})
+    save_agent(body.id)  # Alex devient « Alex <agent> » (plan/build ignorés)
     return {"ok": True, "agent": body.id}
 
 

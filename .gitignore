@@ -27,3 +27,8 @@ vendor/
 .alex-vision-sid
 *.onnx
 brain/.venv/
+
+# États locaux / hors-ligne
+.alex-agent
+.alex-local-model
+pentest/

@@ -1,12 +1,12 @@
 {
   "brainMode": "auto",
   "assistantName": "Alex",
-  "greeting": "Salut Jordy, ravie de te retrouver !",
+  "greeting": "Salut jordy, ravie de te retrouver !",
   "appearanceStyle": "orbe",
-  "themeColor": "#f43f5e",
+  "themeColor": "#4ade80",
   "activityHints": true,
   "voiceEnabled": true,
-  "currentVoice": "siwis",
+  "currentVoice": "kokoro",
   "alwaysOnTop": true,
   "desktopOrb": false,
   "listenAlways": true
