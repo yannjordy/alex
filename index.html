@@ -263,6 +263,24 @@
   .diff2-new .dl-add .dl-code{ color:#a8ffb8; }
   .diff2-line.dl-ctx{ color:rgba(255,246,234,0.50); }
   .diff2-line.dl-empty{ min-height:1.6em; }
+  /* --- Bloc code « fichier écrit » : titre = chemin réel + bouton copier --- */
+  .fb-hdr{
+    display:flex; align-items:center; gap:8px;
+    padding:4px 8px 5px 10px;
+    color:var(--amber-soft);
+  }
+  .fb-hdr .fb-title{
+    flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    color:#ffcf9e;
+  }
+  .fb-copy{
+    flex-shrink:0; display:flex; align-items:center; justify-content:center;
+    width:24px; height:20px; padding:0; cursor:pointer;
+    border:1px solid rgba(var(--amber-rgb),0.3);
+    border-radius:6px; background:rgba(var(--amber-rgb),0.1);
+    color:var(--amber-soft); transition:all .2s ease;
+  }
+  .fb-copy:hover{ background:rgba(var(--amber-rgb),0.22); }
   /* --- Bloc raisonnement (Thought) --- */
   .thought-block{ margin:6px 0; }
   .thought-toggle{
@@ -816,6 +834,28 @@
   #statusChip.ok{ border-color:rgba(80,200,120,0.4); color:#8fe3ae; background:rgba(80,200,120,0.08); }
   #statusChip.bad{ border-color:rgba(255,90,90,0.45); color:#ff9d9d; background:rgba(255,90,90,0.08); }
 
+  /* --- Badge de liaison administrateur (barre supérieure) --- */
+  #fleetBadge{
+    display:none; align-items:center; gap:6px;
+    font-size:10.5px; padding:3px 9px; border-radius:99px;
+    border:1px solid rgba(80,200,120,0.4);
+    color:#8fe3ae; background:rgba(80,200,120,0.08);
+    white-space:nowrap; max-width:240px; overflow:hidden; text-overflow:ellipsis;
+    user-select:none; -webkit-app-region:no-drag;
+  }
+  #fleetBadge.show{ display:inline-flex; }
+  #fleetBadge .fb-dot{
+    width:7px; height:7px; border-radius:50%; flex-shrink:0;
+    background:#4ade80; box-shadow:0 0 7px rgba(74,222,128,0.9);
+  }
+  #fleetBadge.frozen{
+    border-color:rgba(255,90,90,0.45); color:#ff9d9d;
+    background:rgba(255,90,90,0.08);
+    animation: fleetPulse 2.2s ease-in-out infinite;
+  }
+  #fleetBadge.frozen .fb-dot{ display:none; }
+  @keyframes fleetPulse{ 0%,100%{ opacity:1; } 50%{ opacity:0.45; } }
+
   /* --- tiroir latéral (menu hamburger) --- */
   #panelOverlay{
     position:absolute; inset:0; z-index:40;
@@ -1090,9 +1130,11 @@
   /* fenêtre étroite */
   @media (max-width: 640px){
     #statusChip{ max-width:120px; }
+    #fleetBadge{ max-width:150px; }
   }
   @media (max-width: 480px){
     #statusChip{ display:none; }
+    #fleetBadge{ max-width:110px; font-size:10px; }
   }
 
   .spin{
@@ -1229,6 +1271,51 @@
   }
   .ob-skip:hover{ color:rgba(255,246,234,0.7); }
 
+  /* --- Étape « Dossier de travail » + « Compte Alex » --- */
+  .ob-err{
+    font-size:13px; color:#ff9aa9; text-align:center;
+    margin-top:9px; line-height:1.45; min-height:16px;
+  }
+  .ob-choice.off{ opacity:.4; cursor:not-allowed; }
+  .ob-choice.off:hover{ background:rgba(var(--amber-rgb),0.05); border-color:rgba(var(--amber-rgb),0.18); }
+  .ob-note{
+    text-align:center; font-size:12.5px; color:rgba(255,246,234,0.4);
+    margin-top:12px; line-height:1.45;
+  }
+  .ob-pair{
+    margin-top:16px; text-align:center;
+    display:none;
+  }
+  .ob-pair.show{ display:block; animation: obIn .35s cubic-bezier(.22,1,.36,1); }
+  .ob-otp{
+    font-family:'JetBrains Mono','Cascadia Code',monospace;
+    font-size:34px; font-weight:700; letter-spacing:9px;
+    color:var(--amber-soft); background:rgba(var(--amber-rgb),0.08);
+    border:1.5px dashed rgba(var(--amber-rgb),0.5);
+    border-radius:14px; padding:13px 8px 13px 17px;
+    text-shadow:0 0 22px rgba(var(--amber-rgb),0.55);
+    -webkit-user-select:text; user-select:text;
+  }
+  .ob-pair-text{
+    font-size:13px; color:rgba(255,246,234,0.55);
+    margin:12px 0 0; line-height:1.5;
+  }
+  .ob-pair-status{
+    font-size:15px; font-weight:700; margin-top:11px;
+    color:rgba(255,246,234,0.55);
+  }
+  .ob-pair-status.ok{ color:#8fe3ae; }
+  .ob-pair-status.warn{ color:#ff9aa9; }
+  .ob-inline-btn{
+    margin-top:11px; padding:8px 20px; border-radius:10px;
+    font-size:14px; font-family:inherit; font-weight:700;
+    cursor:pointer; border:1px solid rgba(var(--amber-rgb),0.4);
+    background:rgba(var(--amber-rgb),0.12); color:#fff6ea;
+    transition:all .25s ease;
+  }
+  .ob-inline-btn:hover{ background:rgba(var(--amber-rgb),0.22); }
+  .ob-mono{ font-family:'JetBrains Mono','Cascadia Code',monospace; color:var(--amber-soft); }
+
 </style>
 </head>
 <body class="">
@@ -1248,21 +1335,44 @@
       <input class="ob-input" id="obName" type="text" placeholder="Ton prénom…" maxlength="40" autocomplete="off">
     </div>
     <div class="ob-step" data-step="2">
+      <h2 class="ob-title">Où Alex rangera-t-elle ses fichiers ?</h2>
+      <p class="ob-sub">Tous les fichiers créés ou téléchargés par Alex iront ici. Tu pourras le changer plus tard.</p>
+      <input class="ob-input" id="obWorkspace" type="text" placeholder="~/alex-workspace" maxlength="200" autocomplete="off">
+      <div class="ob-err" id="obWorkspaceErr"></div>
+    </div>
+    <div class="ob-step" data-step="3">
       <h2 class="ob-title">Choisis ma voix</h2>
       <p class="ob-sub">Tu pourras la changer plus tard dans les réglages.<br>Clique sur <span style="color:var(--amber-soft)">▶</span> pour écouter un aperçu.</p>
       <div class="ob-grid" id="obVoices"></div>
     </div>
-    <div class="ob-step" data-step="3">
+    <div class="ob-step" data-step="4">
       <h2 class="ob-title">Ta couleur</h2>
       <p class="ob-sub">L'ambiance visuelle d'Alex — la fenêtre change en direct.</p>
       <div class="ob-swatches" id="obSwatches"></div>
     </div>
-    <div class="ob-step" data-step="4">
+    <div class="ob-step" data-step="5">
       <h2 class="ob-title">Ma personnalité</h2>
       <p class="ob-sub">Comment je dois être avec toi au quotidien.</p>
       <div class="ob-grid" id="obPersonalities"></div>
     </div>
-    <div class="ob-step" data-step="5">
+    <div class="ob-step" data-step="6">
+      <h2 class="ob-title">Ton compte Alex</h2>
+      <p class="ob-sub">Alex peut tourner en solo sur cet appareil, ou être reliée à la console d'un administrateur.</p>
+      <input class="ob-input" id="obAccount" type="text" placeholder="Ton nom d'utilisateur…" maxlength="40" autocomplete="off">
+      <div class="ob-grid" style="margin-top:12px;">
+        <div class="ob-choice sel" id="obAccSolo">Utiliser Alex en solo<span class="oc-sub">indépendant, aucun lien</span></div>
+        <div class="ob-choice" id="obAccPair">Relier à un administrateur<span class="oc-sub">code à donner à l'admin</span></div>
+      </div>
+      <div class="ob-note" id="obAccNote" style="display:none">Liaison non configurée sur cette instance</div>
+      <div class="ob-pair" id="obPair">
+        <div class="ob-otp" id="obPairCode"></div>
+        <p class="ob-pair-text" id="obPairText"></p>
+        <div class="ob-pair-status" id="obPairStatus"></div>
+        <button class="ob-inline-btn" id="obPairRegen" style="display:none">Régénérer</button>
+      </div>
+      <div class="ob-err" id="obAccountErr"></div>
+    </div>
+    <div class="ob-step" data-step="7">
       <div class="ob-logo"></div>
       <h2 class="ob-title" id="obDoneTitle">Enchanté !</h2>
       <p class="ob-sub" id="obDoneSub">Tout est prêt. On peut commencer.</p>
@@ -1280,6 +1390,7 @@
   <div id="titlebar">
     <span class="name" id="menuTrigger" title="Ouvrir le menu" style="cursor:pointer; user-select:none; -webkit-app-region:no-drag;">Alex</span>
     <span id="statusChip" title="État du cerveau" class="faded"></span>
+    <span id="fleetBadge" title="Liaison avec l'administrateur"><span class="fb-dot"></span><span id="fleetBadgeText"></span></span>
     <div id="titleBtns">
       <button class="title-btn" id="newChatBtn" title="Nouveau chat">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -2854,6 +2965,57 @@ function renderCodeBlock(code, lang){
   return `<div class="diff2"><div class="diff2-col"><div class="diff2-col-hdr">code</div>${body}</div></div>`;
 }
 
+/* --- Bloc code titré par le chemin (fichier écrit par un outil, event « file ») --- */
+function shortPathForTitle(p){
+  let s = String(p || '').trim();
+  if(!s) return 'code';
+  try{
+    const home = (typeof require !== 'undefined') ? require('os').homedir() : (window.process?.env?.HOME || '');
+    if(home && s === home) s = '~';
+    else if(home && s.startsWith(home + '/')) s = '~' + s.slice(home.length);
+  }catch(e){}
+  return s;
+}
+function langFromPath(p){
+  const ext = (String(p || '').split('.').pop() || '').toLowerCase();
+  if(ext === 'py') return 'python';
+  if(ext === 'html' || ext === 'htm') return 'html';
+  if(ext === 'css' || ext === 'scss' || ext === 'less') return 'css';
+  if(ext === 'svg' || ext === 'xml') return 'svg';
+  if(ext === 'md' || ext === 'txt' || ext === 'sh' || ext === 'yml' || ext === 'yaml') return 'js';
+  return 'js';
+}
+function renderFileBlock(file){
+  if(!file || typeof file.code !== 'string') return null;
+  const el = document.createElement('div');
+  el.className = 'diff2 file-block';
+  const title = shortPathForTitle(file.path);
+  const lines = file.code.split('\n');
+  const hl = highlightCode(file.code, langFromPath(file.path)).split('\n');
+  let body = '';
+  for(let i = 0; i < lines.length; i++){
+    body += `<div class="diff2-line dl-ctx"><span class="dl-num">${i+1}</span><span class="dl-code">${hl[i] || ''}</span></div>`;
+  }
+  el.innerHTML =
+    `<div class="diff2-col"><div class="diff2-col-hdr fb-hdr">` +
+    `<span class="fb-title" title="${escapeHtml(String(file.path || ''))}">${escapeHtml(title)}</span>` +
+    `<button class="fb-copy" title="Copier le code">${SVG_CLIP}</button>` +
+    `</div>${body}</div>`;
+  el._code = file.code;
+  const btn = el.querySelector('.fb-copy');
+  if(btn){
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const txt = el._code || '';
+      const done = ()=>{ btn.innerHTML = SVG_CHECK; setTimeout(()=>{ btn.innerHTML = SVG_CLIP; }, 1500); };
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(txt).then(done).catch(()=> fallbackCopy(txt, done));
+      } else fallbackCopy(txt, done);
+    });
+  }
+  return el;
+}
+
 /* --- Bloc diff 2 colonnes (gauche=ancien, droite=nouveau) --- */
 function renderCodeDiff(code){
   let filePath = '';
@@ -3213,6 +3375,7 @@ async function handleAlexReply(userText){
   msgDiv.className = 'msg alex';
   msgDiv.innerHTML = '<span class="preparing">&gt;</span>';
   chatArea.appendChild(msgDiv);
+  const fileEls = [];
   let fullReply = '';
   let hasConfirm = false;
   let spokenLen = 0;
@@ -3243,6 +3406,12 @@ async function handleAlexReply(userText){
           const parsed = JSON.parse(payload);
           if(parsed.state){ setOrbState(parsed.state); continue; }
           if(parsed.activity){ renderActivity(parsed.activity); continue; }
+          if(parsed.file){
+            /* Écriture de fichier par un outil → bloc code titré par le chemin */
+            const fb = renderFileBlock(parsed.file);
+            if(fb){ fileEls.push(fb); chatArea.appendChild(fb); scrollToBottom(); }
+            continue;
+          }
           if(parsed.question){ renderQuestionWidget(parsed.question); continue; }
           if(parsed.permission){ renderPermissionWidget(parsed.permission); continue; }
           if(parsed.question_resolved || parsed.permission_resolved){
@@ -3316,11 +3485,13 @@ async function handleAlexReply(userText){
       }
       addCopyButton(msgDiv);
     } else {
-      if(!fullReply.trim()){
+      if(!fullReply.trim() && !fileEls.length){
         msgDiv.remove();
         showShape('error', 800);
-      } else {
+      } else if(fullReply.trim()){
         addCopyButton(msgDiv);
+      } else {
+        msgDiv.remove();   /* rien à dire : il ne reste que le(s) bloc(s) de fichier */
       }
       setTimeout(()=> setOrbState('idle'), 200);
     }
@@ -3332,6 +3503,7 @@ async function handleAlexReply(userText){
       return;
     }
     msgDiv.remove();
+    fileEls.forEach(el=> el.remove());
     showShape('error', 800);
     sendMessage("Impossible de joindre le cerveau d'Alex — le service Python (uvicorn) tourne-t-il ?", 'alex');
     setTimeout(()=> setOrbState('idle'), 200);
@@ -3470,6 +3642,36 @@ async function checkNetwork(){
 
 setInterval(checkNetwork, 15000);
 checkNetwork();
+
+/* --- Badge de liaison administrateur (barre supérieure) --- */
+async function checkFleet(){
+  const el = document.getElementById('fleetBadge');
+  if(!el) return;
+  try{
+    const r = await fetch('http://127.0.0.1:8765/fleet/state', { signal: AbortSignal.timeout(5000) });
+    if(!r.ok) throw new Error('http');
+    const d = await r.json();
+    if(!d || d.configured === false){ el.classList.remove('show', 'frozen'); return; }
+    const txt = document.getElementById('fleetBadgeText');
+    if(d.role === 'daughter' && d.linked){
+      el.classList.add('show');
+      el.classList.remove('frozen');
+      if(txt) txt.textContent = 'Liée à admin ' + (d.mother_username || '');
+      return;
+    }
+    if(d.frozen){
+      el.classList.add('show', 'frozen');
+      if(txt) txt.textContent = '⏸ Suspendue';
+      return;
+    }
+    el.classList.remove('show', 'frozen');
+  }catch(e){
+    /* backend fleet absent/en cours de démarrage : pas de badge, jamais de plantage */
+    el.classList.remove('show', 'frozen');
+  }
+}
+setInterval(checkFleet, 10000);
+checkFleet();
 
 async function runSlashCommand(text){
   const body = text.slice(1);
@@ -4669,10 +4871,16 @@ function obSaveCfg(partial){
 }
 const OB = {
   step: 0,
-  total: 6,
-  data: { name:'', voice:'siwis', themeColor:'#f43f5e', personality:'amicale', onboarded:false },
+  total: 8,
+  data: {
+    name:'', voice:'siwis', themeColor:'#f43f5e', personality:'amicale', onboarded:false,
+    workspace_dir:'~/alex-workspace', account_username:'',
+  },
   done: false,
   back: false,
+  busy: false,
+  /* étape « compte » — la VÉRITÉ sur la liaison est /fleet/state (jamais en prefs) */
+  fleet: { available:null, linked:false, mother:'', mode:'solo', polling:null, started:0, code:'' },
 };
 const OB_COLORS = [
   { hex:'#f43f5e', nom:'Rose' },
@@ -4728,14 +4936,40 @@ function obRenderStep(){
     const inp = document.getElementById('obName');
     setTimeout(()=> inp.focus(), 120);
   }
-  if(OB.step === 5) obFillDone();
+  if(OB.step === 2){
+    const inp = document.getElementById('obWorkspace');
+    if(!(inp.value || '').trim()) inp.value = OB.data.workspace_dir || '~/alex-workspace';
+    document.getElementById('obWorkspaceErr').textContent = '';
+    setTimeout(()=> inp.focus(), 120);
+  }
+  if(OB.step === 6) obEnterAccountStep();
+  if(OB.step === OB.total - 1) obFillDone();
 }
 function obFillDone(){
   const nom = (OB.data.name || '').trim();
   document.getElementById('obDoneTitle').textContent = nom ? `Enchanté ${nom} !` : 'Enchanté !';
   const voix = (document.querySelector('#obVoices .ob-choice.sel')?.dataset.voice) || OB.data.voice;
-  document.getElementById('obDoneSub').textContent =
-    `Je m'appelle Alex, ma voix est « ${voix} » et je te connais désormais. On peut commencer.`;
+  const ws = (OB.data.workspace_dir || '').trim() || '~/alex-workspace';
+  const compte = (OB.data.account_username || '').trim() || nom;
+  const lie = OB.fleet.linked ? 'liée à un administrateur' : 'en solo';
+  document.getElementById('obDoneSub').innerHTML =
+    `Je m'appelle Alex, ma voix est « ${escapeHtml(voix)} » et je te connais désormais.<br>` +
+    `Dossier de travail : <span class="ob-mono">${escapeHtml(ws)}</span><br>` +
+    (compte ? `Compte : <span class="ob-mono">${escapeHtml(compte)}</span> — <span id="obDoneAccount">${lie}</span>.<br>` : '') +
+    `On peut commencer.`;
+  /* la vérité sur la liaison vient de /fleet/state (jamais des prefs) */
+  if(compte){
+    obFleetState().then(st=>{
+      const el = document.getElementById('obDoneAccount');
+      if(!el) return;
+      const linked = !!(st && st.linked);
+      OB.fleet.linked = linked;
+      if(linked && st.mother_username) OB.fleet.mother = st.mother_username;
+      el.textContent = linked
+        ? `liée à l'administrateur ${OB.fleet.mother || st.mother_username || ''}`.trim()
+        : 'en solo';
+    }).catch(()=>{});
+  }
 }
 function obLoadVoices(){
   const grid = document.getElementById('obVoices');
@@ -4801,7 +5035,15 @@ function obLoadPersonalities(){
 async function obSave(complete){
   OB.data.onboarded = complete !== false;
   const nom = (OB.data.name || '').trim() || 'Jordy';
-  try{ await fetch('http://127.0.0.1:8765/prefs', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(OB.data) }); }catch(e){}
+  try{
+    const r = await fetch('http://127.0.0.1:8765/prefs', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(OB.data) });
+    if(!r.ok && r.status === 400){
+      /* chemin de travail refusé (400) : on sauvegarde le reste sans bloquer la fin */
+      const retry = Object.assign({}, OB.data);
+      delete retry.workspace_dir;
+      try{ await fetch('http://127.0.0.1:8765/prefs', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(retry) }); }catch(e){}
+    }
+  }catch(e){}
   try{
     obSaveCfg({
       themeColor: OB.data.themeColor,
@@ -4813,7 +5055,8 @@ async function obSave(complete){
   obApplyTheme(OB.data.themeColor);
   OB.done = true;
 }
-function obNextStep(){
+async function obNextStep(){
+  if(OB.busy) return;
   if(OB.step === 1){
     const nom = (document.getElementById('obName').value || '').trim();
     if(!nom){
@@ -4823,6 +5066,46 @@ function obNextStep(){
       return;
     }
     OB.data.name = nom;
+  }
+  if(OB.step === 2){
+    /* Dossier de travail : le cerveau fait expanduser + makedirs (POST /prefs) */
+    const inp = document.getElementById('obWorkspace');
+    const err = document.getElementById('obWorkspaceErr');
+    const ws = (inp.value || '').trim() || '~/alex-workspace';
+    OB.busy = true;
+    try{
+      const r = await fetch('http://127.0.0.1:8765/prefs', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ workspace_dir: ws }),
+      });
+      if(r.status === 400){
+        const d = await r.json().catch(()=>({}));
+        err.textContent = d.detail || 'Impossible de créer ce dossier — essaie un autre chemin.';
+        return;
+      }
+      const d = await r.json().catch(()=>({}));
+      OB.data.workspace_dir = (d && d.workspace_dir) || ws;
+      err.textContent = '';
+    }catch(e){
+      /* cerveau injoignable : on garde la saisie locale et on avance */
+      OB.data.workspace_dir = ws;
+      err.textContent = '';
+    }finally{
+      OB.busy = false;
+    }
+  }
+  if(OB.step === 6){
+    const nom = (document.getElementById('obAccount').value || '').trim()
+      || (OB.data.name || '').trim();
+    OB.data.account_username = nom;
+    obPairStop();
+    try{
+      await fetch('http://127.0.0.1:8765/prefs', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ account_username: nom }),
+      });
+    }catch(e){}
+    document.getElementById('obAccountErr').textContent = '';
   }
   if(OB.step === OB.total - 1){
     obSave(true);
@@ -4836,16 +5119,138 @@ function obNextStep(){
   }
   OB.back = false;
   OB.step++;
-  if(OB.step === 2) obLoadVoices();
-  if(OB.step === 3) obLoadSwatches();
-  if(OB.step === 4) obLoadPersonalities();
+  if(OB.step === 3) obLoadVoices();
+  if(OB.step === 4) obLoadSwatches();
+  if(OB.step === 5) obLoadPersonalities();
   obRenderStep();
 }
 function obPrevStep(){
   if(OB.step <= 0 || OB.step >= OB.total - 1) return;
+  obPairStop();
   OB.back = true;
   OB.step--;
   obRenderStep();
+}
+/* --- Étape « Compte Alex » : solo ou liaison administrateur (backend /fleet/*) --- */
+async function obFleetState(){
+  try{
+    const r = await fetch('http://127.0.0.1:8765/fleet/state', { signal: AbortSignal.timeout(5000) });
+    if(!r.ok) throw new Error('http ' + r.status);
+    const d = await r.json();
+    if(!d || d.configured === false) return null;
+    return d;
+  }catch(e){ return null; }   /* jamais de plantage : backend fleet arrivant en parallèle */
+}
+function obPairStop(){
+  if(OB.fleet.polling){ clearInterval(OB.fleet.polling); OB.fleet.polling = null; }
+}
+function obAccSetMode(mode){
+  OB.fleet.mode = mode;
+  document.getElementById('obAccSolo').classList.toggle('sel', mode === 'solo');
+  document.getElementById('obAccPair').classList.toggle('sel', mode === 'pair');
+  if(mode !== 'pair'){
+    document.getElementById('obPair').classList.remove('show');
+  }
+}
+function obAccUnavailable(msg){
+  OB.fleet.available = false;
+  OB.fleet.linked = false;
+  document.getElementById('obAccNote').textContent = msg || 'Liaison non configurée sur cette instance';
+  document.getElementById('obAccNote').style.display = 'block';
+  document.getElementById('obAccPair').classList.add('off');
+  obPairStop();
+  document.getElementById('obPair').classList.remove('show');
+  document.getElementById('obAccountErr').textContent = '';
+  obAccSetMode('solo');
+}
+async function obEnterAccountStep(){
+  const inp = document.getElementById('obAccount');
+  if(!(inp.value || '').trim()) inp.value = OB.data.account_username || OB.data.name || '';
+  /* déjà en cours de jumelage (retour en arrière/avant) : on ne réinitialise pas l'affichage */
+  if(OB.fleet.mode === 'pair' && OB.fleet.polling) return;
+  document.getElementById('obAccNote').style.display = 'none';
+  document.getElementById('obAccPair').classList.remove('off');
+  document.getElementById('obAccountErr').textContent = '';
+  const st = await obFleetState();
+  if(!st){ obAccUnavailable(); return; }   /* configured:false OU erreur → solo, on ne bloque jamais */
+  OB.fleet.available = true;
+  if(st.linked){
+    OB.fleet.linked = true;
+    OB.fleet.mother = st.mother_username || '';
+    OB.fleet.phase = 'linked';
+    document.getElementById('obPairCode').textContent = '';
+    document.getElementById('obPairText').textContent = 'Cet appareil est déjà relié.';
+    const s = document.getElementById('obPairStatus');
+    s.textContent = '✓ Lié à ' + (OB.fleet.mother || 'admin');
+    s.className = 'ob-pair-status ok';
+    document.getElementById('obPairRegen').style.display = 'none';
+    document.getElementById('obPair').classList.add('show');
+    document.getElementById('obAccSolo').classList.remove('sel');
+    document.getElementById('obAccPair').classList.add('sel');
+    OB.fleet.mode = 'pair';
+  }else{
+    OB.fleet.linked = false;
+    OB.fleet.phase = 'idle';
+    obAccSetMode('solo');
+  }
+}
+async function obPairStart(){
+  const panel = document.getElementById('obPair');
+  const codeEl = document.getElementById('obPairCode');
+  const txtEl = document.getElementById('obPairText');
+  const stEl = document.getElementById('obPairStatus');
+  const regen = document.getElementById('obPairRegen');
+  obPairStop();
+  stEl.textContent = ''; stEl.className = 'ob-pair-status';
+  regen.style.display = 'none';
+  codeEl.textContent = '· · · · · · · ·';
+  txtEl.textContent = 'Génération du code…';
+  panel.classList.add('show');
+  try{
+    const r = await fetch('http://127.0.0.1:8765/fleet/pairing/generate', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}),
+    });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.code) throw new Error('generate ' + r.status);
+    OB.fleet.code = String(d.code);
+    OB.fleet.started = Date.now();
+    OB.fleet.phase = 'waiting';
+    codeEl.textContent = OB.fleet.code;
+    txtEl.textContent = "Donne ce code à l'administrateur depuis sa console d'administration pour relier cet appareil.";
+    OB.fleet.polling = setInterval(obPairPoll, 5000);
+    obPairPoll();
+  }catch(e){
+    obAccUnavailable('Liaison non configurée sur cette instance');
+  }
+}
+async function obPairPoll(){
+  const stEl = document.getElementById('obPairStatus');
+  const regen = document.getElementById('obPairRegen');
+  const codeEl = document.getElementById('obPairCode');
+  try{
+    const r = await fetch('http://127.0.0.1:8765/fleet/pairing/status', { signal: AbortSignal.timeout(4000) });
+    const d = await r.json().catch(()=>({}));
+    if(d && d.state === 'linked'){
+      OB.fleet.linked = true;
+      OB.fleet.mother = d.mother_username || '';
+      OB.fleet.phase = 'linked';
+      obPairStop();
+      stEl.textContent = '✓ Lié à ' + (OB.fleet.mother || 'admin');
+      stEl.className = 'ob-pair-status ok';
+      setTimeout(()=>{ if(OB.step === 6 && !OB.busy) obNextStep(); }, 1500);
+      return;
+    }
+    const elapsed = Date.now() - OB.fleet.started;
+    if((d && d.state === 'expired') || elapsed >= 10 * 60 * 1000){
+      OB.fleet.phase = 'expired';
+      OB.fleet.code = '';
+      obPairStop();
+      codeEl.textContent = '';
+      stEl.textContent = 'Code expiré — génère un nouveau code.';
+      stEl.className = 'ob-pair-status warn';
+      regen.style.display = 'inline-block';
+    }
+  }catch(e){ /* erreur fetch silencieuse → on retentera au prochain tick */ }
 }
 /* Déclencheur : affiché seulement si jamais configuré */
 async function obCheck(){
@@ -4856,13 +5261,32 @@ async function obCheck(){
   if(prefs.voice) OB.data.voice = prefs.voice;
   if(prefs.themeColor) OB.data.themeColor = prefs.themeColor;
   if(prefs.personality) OB.data.personality = prefs.personality;
+  if(prefs.workspace_dir) OB.data.workspace_dir = prefs.workspace_dir;
+  if(prefs.account_username) OB.data.account_username = prefs.account_username;
   /* petit délai pour laisser la GUI se poser */
   setTimeout(obShow, 900);
 }
 document.getElementById('obNext').addEventListener('click', obNextStep);
 document.getElementById('obBack').addEventListener('click', obPrevStep);
-document.getElementById('obSkip').addEventListener('click', ()=>{ obSave(false); obHide(); });
+document.getElementById('obSkip').addEventListener('click', ()=>{ obPairStop(); obSave(false); obHide(); });
 document.getElementById('obName').addEventListener('keydown', e=>{ if(e.key === 'Enter') obNextStep(); });
+document.getElementById('obWorkspace').addEventListener('keydown', e=>{ if(e.key === 'Enter') obNextStep(); });
+document.getElementById('obAccount').addEventListener('keydown', e=>{ if(e.key === 'Enter') obNextStep(); });
+/* Étape compte : choix solo / relier + régénération du code */
+document.getElementById('obAccSolo').addEventListener('click', ()=>{
+  if(OB.fleet.mode === 'solo') return;
+  obPairStop();
+  obAccSetMode('solo');
+});
+document.getElementById('obAccPair').addEventListener('click', ()=>{
+  if(document.getElementById('obAccPair').classList.contains('off')) return;
+  if(OB.fleet.mode === 'pair' && OB.fleet.phase === 'waiting') return;
+  document.getElementById('obAccSolo').classList.remove('sel');
+  document.getElementById('obAccPair').classList.add('sel');
+  OB.fleet.mode = 'pair';
+  obPairStart();
+});
+document.getElementById('obPairRegen').addEventListener('click', ()=> obPairStart());
 obCheck();
 
 /* hook de debug/pilotage à distance (CDP) */

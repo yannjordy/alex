@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Console Alex — Administration</title>
+<link rel="stylesheet" href="console.css">
+</head>
+<body>
+
+<header id="topbar">
+  <h1>Console Alex — Administration</h1>
+  <div id="topbar-right">
+    <span id="brainChip" class="chip chip-warn" hidden>Cerveau injoignable</span>
+    <span id="roleBadge" class="badge">…</span>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- Panneau « non configurée » -->
+  <section id="notConfigured" class="nc-panel" hidden>
+    <div class="nc-icon">⚙</div>
+    <h2>Service de liaison non configuré</h2>
+    <p>renseigne <code>ALEX_SUPABASE_URL</code> et <code>ALEX_SUPABASE_KEY</code> dans <code>brain/.env</code> puis redémarre le cerveau.</p>
+    <button class="btn" id="ncRetry">Réessayer</button>
+  </section>
+
+  <div id="cards">
+
+    <!-- 1. Appareils liés -->
+    <section class="card" id="cardDevices">
+      <div class="card-head">
+        <h2>Appareils liés</h2>
+        <span class="count" id="devicesCount"></span>
+      </div>
+      <div class="card-body">
+        <table id="devicesTable">
+          <thead>
+            <tr>
+              <th>Utilisateur</th><th>Appareil</th><th>Statut</th>
+              <th>Dernière vue</th><th>Version</th><th>Dossier</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="devicesBody">
+            <tr><td colspan="7" class="empty">Chargement…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 2. En attente de liaison -->
+    <section class="card" id="cardPending">
+      <div class="card-head">
+        <h2>En attente de liaison</h2>
+        <span class="count" id="pendingCount"></span>
+      </div>
+      <div class="card-body">
+        <div id="pendingList" class="pending-list">
+          <div class="empty">Chargement…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Alertes -->
+    <section class="card" id="cardAlerts">
+      <div class="card-head">
+        <h2>Alertes</h2>
+        <span class="count" id="alertsCount"></span>
+      </div>
+      <div class="card-body">
+        <div id="alertsList" class="alerts-list">
+          <div class="empty">Chargement…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Journal d'intégrité -->
+    <section class="card" id="cardAudit">
+      <div class="card-head">
+        <h2>Journal d'intégrité</h2>
+        <div class="audit-controls">
+          <select id="auditDevice"><option value="">— Appareil —</option></select>
+          <button class="btn" id="auditVerify">Vérifier l'intégrité</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <table id="auditTable">
+          <thead>
+            <tr><th class="col-seq">Séq</th><th class="col-ts">Heure</th><th>Événement</th><th class="col-hash">Empreinte</th></tr>
+          </thead>
+          <tbody id="auditBody">
+            <tr><td colspan="4" class="empty">Choisis un appareil pour charger son journal.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<div id="toasts"></div>
+
+<script src="console.js"></script>
+</body>
+</html>

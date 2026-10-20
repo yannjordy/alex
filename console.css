@@ -1,0 +1,117 @@
+/* Console Alex — Administration (thème sombre) */
+:root{
+  --accent:#7c6cf0;
+  --bg:#0b0b12;
+  --card:#15151f;
+  --card-border:rgba(255,255,255,0.07);
+  --text:#eceaf5;
+  --text-dim:rgba(236,234,245,0.5);
+  --text-faint:rgba(236,234,245,0.35);
+  --green:#3ddc84;
+  --red:#ff5c5c;
+  --amber:#f5a623;
+  --gray:#8a8a99;
+}
+*{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; width:100%; height:100%; background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; font-size:14px; overflow:hidden; }
+[hidden]{ display:none !important; }
+body{ display:flex; flex-direction:column; }
+
+/* ---- En-tête ---- */
+#topbar{ display:flex; align-items:center; justify-content:space-between; padding:14px 22px; border-bottom:1px solid var(--card-border); flex-shrink:0; background:linear-gradient(180deg, rgba(255,255,255,0.03), transparent); }
+#topbar h1{ margin:0; font-size:16px; font-weight:600; letter-spacing:.4px; }
+#topbar-right{ display:flex; align-items:center; gap:10px; }
+.badge{ font-size:12px; padding:5px 12px; border-radius:999px; background:rgba(255,255,255,0.06); border:1px solid var(--card-border); color:var(--text-dim); white-space:nowrap; }
+.badge.role-mother{ color:var(--accent); border-color:color-mix(in srgb, var(--accent) 45%, transparent); background:color-mix(in srgb, var(--accent) 14%, transparent); }
+.badge.role-daughter{ color:var(--green); border-color:rgba(61,220,132,.4); background:rgba(61,220,132,.1); }
+.badge.role-none{ color:var(--amber); border-color:rgba(245,166,35,.4); background:rgba(245,166,35,.1); }
+.chip{ font-size:11.5px; padding:4px 10px; border-radius:999px; border:1px solid transparent; }
+.chip-warn{ color:var(--amber); background:rgba(245,166,35,.12); border-color:rgba(245,166,35,.35); }
+
+/* ---- Grille des cartes ---- */
+#main{ flex:1; overflow-y:auto; padding:18px 22px 22px; }
+#cards{ display:grid; grid-template-columns:1fr 1fr; grid-auto-rows:minmax(0,auto); gap:16px; }
+#cardDevices{ grid-column:1 / -1; }
+#cardAlerts{ grid-column:1 / 2; }
+#cardAudit{ grid-column:2 / 3; }
+
+.card{ background:var(--card); border:1px solid var(--card-border); border-radius:14px; display:flex; flex-direction:column; overflow:hidden; min-height:0; }
+.card-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-bottom:1px solid var(--card-border); flex-shrink:0; }
+.card-head h2{ margin:0; font-size:13.5px; font-weight:600; letter-spacing:.4px; }
+.count{ font-size:11.5px; color:var(--text-faint); }
+.card-body{ padding:8px 10px 12px; overflow-y:auto; max-height:280px; }
+
+/* ---- Tableaux ---- */
+table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+th{ text-align:left; font-weight:500; color:var(--text-faint); font-size:11px; text-transform:uppercase; letter-spacing:.5px; padding:8px 10px; border-bottom:1px solid var(--card-border); white-space:nowrap; }
+td{ padding:9px 10px; border-bottom:1px solid rgba(255,255,255,0.04); vertical-align:middle; }
+tbody tr:last-child td{ border-bottom:none; }
+tbody tr:hover{ background:rgba(255,255,255,0.02); }
+td.empty, .empty{ text-align:center; color:var(--text-faint); padding:22px 10px; font-size:12.5px; }
+td.dim{ color:var(--text-dim); }
+.col-seq{ width:60px; } .col-ts{ width:70px; } .col-hash{ width:110px; }
+.mono{ font-family:ui-monospace,'Cascadia Mono',Menlo,monospace; font-size:11.5px; color:var(--text-dim); }
+.event-cell{ max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* Pastille de statut */
+.pill{ display:inline-flex; align-items:center; gap:6px; font-size:11.5px; padding:3px 10px; border-radius:999px; white-space:nowrap; }
+.pill::before{ content:''; width:7px; height:7px; border-radius:50%; background:currentColor; }
+.pill.online{ color:var(--green); background:rgba(61,220,132,.1); }
+.pill.stopped{ color:var(--red); background:rgba(255,92,92,.1); }
+.pill.offline{ color:var(--gray); background:rgba(138,138,153,.12); }
+
+/* ---- Boutons ---- */
+.btn{ background:rgba(255,255,255,0.06); border:1px solid var(--card-border); color:var(--text); padding:6px 12px; border-radius:9px; font-size:12px; cursor:pointer; transition:all .18s; font-family:inherit; }
+.btn:hover{ background:rgba(255,255,255,0.1); border-color:rgba(255,255,255,0.16); }
+.btn:disabled{ opacity:.45; cursor:default; }
+.btn-accent{ background:color-mix(in srgb, var(--accent) 18%, transparent); border-color:color-mix(in srgb, var(--accent) 45%, transparent); color:var(--accent); }
+.btn-accent:hover{ background:color-mix(in srgb, var(--accent) 28%, transparent); }
+.btn-danger{ background:rgba(255,92,92,0.08); border-color:rgba(255,92,92,0.3); color:#ff9d9d; }
+.btn-danger:hover{ background:rgba(255,92,92,0.16); }
+.actions{ display:flex; gap:6px; justify-content:flex-end; }
+.actions .btn{ padding:4px 9px; font-size:11.5px; }
+
+/* ---- Carte « En attente » ---- */
+.pending-list{ display:flex; flex-direction:column; gap:8px; }
+.pending-row{ display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--card-border); border-radius:10px; background:rgba(255,255,255,0.02); flex-wrap:wrap; }
+.pending-row .p-main{ flex:1; min-width:140px; }
+.pending-row .p-user{ font-size:13px; font-weight:600; }
+.pending-row .p-meta{ font-size:11.5px; color:var(--text-dim); margin-top:2px; }
+.pending-row input{ width:120px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:7px 10px; color:var(--text); font-size:13px; letter-spacing:2px; outline:none; font-family:inherit; text-align:center; }
+.pending-row input:focus{ border-color:var(--accent); }
+.pending-row .p-error{ width:100%; font-size:11.5px; color:var(--red); }
+
+/* ---- Carte Alertes ---- */
+.alerts-list{ display:flex; flex-direction:column; gap:6px; }
+.alert-row{ display:flex; gap:10px; align-items:baseline; padding:8px 12px; border-radius:9px; background:rgba(255,255,255,0.02); border-left:3px solid var(--gray); font-size:12.5px; }
+.alert-row .lvl{ font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; flex-shrink:0; color:var(--gray); }
+.alert-row.warn{ border-left-color:var(--amber); } .alert-row.warn .lvl{ color:var(--amber); }
+.alert-row.crit{ border-left-color:var(--red); } .alert-row.crit .lvl{ color:var(--red); }
+.alert-row .msg{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.alert-row .when{ font-size:11px; color:var(--text-faint); flex-shrink:0; }
+
+/* ---- Journal d'intégrité ---- */
+.audit-controls{ display:flex; gap:8px; align-items:center; }
+.audit-controls select{ background:rgba(255,255,255,0.05); border:1px solid var(--card-border); color:var(--text); border-radius:8px; padding:6px 10px; font-size:12px; outline:none; font-family:inherit; max-width:200px; }
+.audit-controls select:focus{ border-color:var(--accent); }
+.audit-controls option{ background:var(--card); }
+
+/* ---- Panneau non configuré ---- */
+.nc-panel{ grid-column:1 / -1; background:var(--card); border:1px solid var(--card-border); border-radius:14px; padding:48px 30px; text-align:center; }
+.nc-panel .nc-icon{ font-size:34px; opacity:.5; margin-bottom:10px; }
+.nc-panel h2{ margin:0 0 10px; font-size:16px; font-weight:600; }
+.nc-panel p{ margin:0 0 18px; color:var(--text-dim); font-size:13px; line-height:1.6; }
+.nc-panel code{ background:rgba(255,255,255,0.06); border:1px solid var(--card-border); border-radius:6px; padding:2px 6px; font-size:12px; }
+
+/* ---- Toasts ---- */
+#toasts{ position:fixed; bottom:18px; right:18px; display:flex; flex-direction:column; gap:8px; z-index:50; }
+.toast{ padding:10px 16px; border-radius:10px; font-size:12.5px; background:var(--card); border:1px solid var(--card-border); color:var(--text); box-shadow:0 6px 24px rgba(0,0,0,.45); animation:toastIn .2s ease; max-width:340px; }
+.toast.ok{ border-color:rgba(61,220,132,.45); }
+.toast.err{ border-color:rgba(255,92,92,.5); }
+@keyframes toastIn{ from{ opacity:0; transform:translateY(8px); } to{ opacity:1; transform:none; } }
+
+/* ---- Scrollbar ---- */
+::-webkit-scrollbar{ width:9px; height:9px; }
+::-webkit-scrollbar-thumb{ background:rgba(255,255,255,0.1); border-radius:9px; }
+::-webkit-scrollbar-thumb:hover{ background:rgba(255,255,255,0.18); }
+::-webkit-scrollbar-track{ background:transparent; }

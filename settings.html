@@ -145,6 +145,9 @@
           <div><div class="t">Raccourci</div><div class="d">Affiche/masque Alex.</div></div>
           <div class="shortcut-pill">Alt+Space</div>
         </div>
+        <div style="margin-top:18px;">
+          <button class="save-btn" id="openConsoleBtn">Console administrateur</button>
+        </div>
       </div>
       <div class="section" id="section-assistant">
         <h2>Assistant</h2>
@@ -437,6 +440,9 @@ document.getElementById('resetBtn').addEventListener('click', ()=>{
 });
 
 document.getElementById('closeBtn').addEventListener('click', ()=> ipc.send('close-settings'));
+
+/* Console d'administration (Alex mère) */
+document.getElementById('openConsoleBtn').addEventListener('click', ()=> ipc.send('open-console'));
 </script>
 </body>
 </html>

@@ -316,12 +316,21 @@ def sys_prompt() -> str:
         f"- Personnalité qu'il a demandée pour toi : {_perso} "
         f"({_perso_map.get(_perso, _perso)}).\n"
     )
+    # Dossier de travail (prefs, chargées une seule fois ci-dessus) — écriture des fichiers
+    _ws = str(_prefs.get("workspace_dir") or "").strip() or prefs_store.workspace_dir_default()
+    _ws = os.path.abspath(os.path.expanduser(_ws))
+    _workspace = (
+        f"\n\n## Dossier de travail\n"
+        f"Dossier de travail : {_ws} — écris TOUS tes fichiers dedans et indique toujours "
+        f"leur chemin complet dans le titre du bloc de code.\n"
+    )
     return (
         SYSTEM_PROMPT
         + f"\n\n## Date et heure courantes (heure locale de {_nom})\n"
         + f"Nous sommes le {_now_fr}. Utilise cette information pour répondre aux questions sur l'heure, la date, les durées et les jours.\n"
         + todo_store.context_for_llm()
         + _profil
+        + _workspace
         + _ident
     )
 
@@ -343,8 +352,16 @@ async def prefs_get():
 
 @app.post("/prefs")
 async def prefs_set(payload: dict):
-    allowed = {"name", "voice", "themeColor", "greeting", "personality", "onboarded"}
+    allowed = {
+        "name", "voice", "themeColor", "greeting", "personality", "onboarded",
+        "workspace_dir", "account_username",
+    }
     data = {k: v for k, v in (payload or {}).items() if k in allowed}
+    if "workspace_dir" in data:
+        try:
+            data["workspace_dir"] = prefs_store.ensure_workspace_dir(data["workspace_dir"])
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     return prefs_store.save(data)
 
 @app.get("/todo")
@@ -780,8 +797,57 @@ async def _opencode_ensure_session(client: httpx.AsyncClient) -> str:
     return sid
 
 
+# --- Événements « fichier écrit » → bloc de code titré par le chemin (GUI) ---
+_WRITE_TOOLS = {"write", "edit", "patch", "ecrire_fichier", "creer_fichier", "write_file"}
+_FILE_EVENT_MAX = 60_000
+
+
+def _file_event(path, params: Optional[dict] = None) -> Optional[dict]:
+    """Construit {'file': {'path': <absolu>, 'code': <contenu>}} pour une écriture réussie.
+
+    Contenu : celui transmis à l'outil (write), sinon relu sur disque (edit/patch),
+    sinon repli sur les paramètres de l'outil. Chemin toujours absolu.
+    """
+    raw = str(path or "").strip()
+    if not raw:
+        return None
+    abs_path = os.path.abspath(os.path.expanduser(raw))
+    code = None
+    p = params if isinstance(params, dict) else {}
+    sent = p.get("content")
+    if isinstance(sent, str) and sent:
+        code = sent
+    if code is None:
+        try:
+            if os.path.isfile(abs_path):
+                with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+                    code = f.read(_FILE_EVENT_MAX)
+        except OSError:
+            code = None
+    if code is None:
+        for key in ("newString", "new_string", "text", "patch"):
+            val = p.get(key)
+            if isinstance(val, str) and val:
+                code = val
+                break
+    if code is None:
+        return None
+    return {"path": abs_path, "code": code[:_FILE_EVENT_MAX]}
+
+
+def _tool_write_file_event(name, params: Optional[dict] = None) -> Optional[dict]:
+    """True si l'outil (tools_registry ou opencode) vient d'écrire un fichier."""
+    tool = str(name or "").strip().lower()
+    if not tool or tool not in _WRITE_TOOLS:
+        return None
+    p = params if isinstance(params, dict) else {}
+    target = p.get("filePath") or p.get("file_path") or p.get("path") or p.get("dst") or p.get("dest")
+    return _file_event(target, p)
+
+
 async def ask_opencode_events(message: str, timeout: float = 300.0, gen: int = 0):
-    """Générateur : yield {'activity': ...} pour chaque outil opencode, puis {'reply': ...} ou {'error': ...}."""
+    """Générateur : yield {'activity': ...} pour chaque outil opencode, {'file': ...}
+    à chaque écriture de fichier réussie, puis {'reply': ...} ou {'error': ...}."""
     import time as _t
     global _chat_generation
     try:
@@ -837,6 +903,7 @@ async def ask_opencode_events(message: str, timeout: float = 300.0, gen: int = 0
             deadline = _t.time() + timeout
             tick = 0
             seen_tools: dict = {}
+            seen_files: set = set()
             relayed_q: dict = {}
             relayed_p: dict = {}
             while _t.time() < deadline:
@@ -916,6 +983,15 @@ async def ask_opencode_events(message: str, timeout: float = 300.0, gen: int = 0
                             "input": st.get("input") or {},
                             "output": str(st.get("output") or "")[:500],
                         }}
+                        # Écriture de fichier réussie → event « file » (bloc code titré)
+                        if str(st.get("status") or "").lower() in ("completed", "success", "done"):
+                            _inp = st.get("input") or {}
+                            fev = _tool_write_file_event(p.get("name") or p.get("tool"), _inp)
+                            if fev:
+                                _fkey = f"{fev['path']}:{len(fev['code'])}"
+                                if _fkey not in seen_files:
+                                    seen_files.add(_fkey)
+                                    yield {"file": fev}
                     if m.get("finish") == "stop":
                         txt = " ".join(
                             p.get("text", "") for p in m.get("content", [])
@@ -1314,6 +1390,8 @@ async def _run_device(action, matched):
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
+    if fleet.is_frozen():
+        return ChatResponse(reply="Alex est suspendue par l'administrateur de cette instance.", source="fleet")
     dact, dm = download_control.match(req.message)
     if dact:
         reply = await download_control.run(dact, dm)
@@ -1371,6 +1449,12 @@ async def chat(req: ChatRequest):
 
 @app.post("/chat/stream")
 async def chat_stream(req: ChatRequest):
+    if fleet.is_frozen():
+        _frozen_reply = {"reply": "Alex est suspendue par l'administrateur de cette instance.", "source": "fleet"}
+        async def frozen_done():
+            yield f"data: {json.dumps(_frozen_reply)}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(frozen_done(), media_type="text/event-stream")
     dact, dm = download_control.match(req.message)
     if dact:
         reply = await download_control.run(dact, dm)
@@ -1471,6 +1555,8 @@ async def chat_stream(req: ChatRequest):
         async for ev in ask_opencode_events(req.message, gen=gen):
             if "activity" in ev:
                 yield f"data: {json.dumps({'activity': ev['activity']})}\n\n"
+            elif "file" in ev:
+                yield f"data: {json.dumps({'file': ev['file']})}\n\n"
             elif "question" in ev:
                 yield f"data: {json.dumps({'question': ev['question']})}\n\n"
             elif "permission" in ev:
@@ -2738,3 +2824,155 @@ async def proof_open():
         return {"ok": True, "url": "http://127.0.0.1:8765/proof"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+# ===================== FLEET — jumelage mère/fille + hooks audit =====================
+# Le garde-fou « Alex suspendue » est posé en tête de /chat et /chat/stream
+# (fleet.is_frozen()). Ici : router /fleet/*, audit (outils + chats) et
+# tâches background (heartbeat + poll des commandes).
+try:
+    from . import fleet
+    from . import fleet_api
+    app.include_router(fleet_api.router)
+except Exception as _fleet_err:  # jamais de crash au démarrage
+    print(f"[fleet] module indisponible : {_fleet_err}", flush=True)
+
+    class _FleetStub:
+        is_frozen = staticmethod(lambda: False)
+        log_event = staticmethod(lambda *a, **k: None)
+        start_background = staticmethod(lambda: None)
+
+        @staticmethod
+        async def alert(*a, **k):
+            return None
+
+    fleet = _FleetStub()
+
+
+# --- hook audit : chaque chat émis, avec la source utilisée (best-effort) ---
+def _fleet_audit_chat(path: str, raw: str) -> None:
+    source = None
+    try:
+        if path == "/chat":
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                source = data.get("source")
+    except (json.JSONDecodeError, ValueError):
+        pass
+    if source is None:
+        found = None
+        for m in re.finditer(r'"source"\s*:\s*"([^"]*)"', raw):
+            found = m.group(1)
+        source = found
+    fleet.log_event({"event": "chat", "path": path, "source": source}, "info")
+
+
+@app.middleware("http")
+async def _fleet_audit_middleware(request, call_next):
+    """Tappe /chat et /chat/stream : audite la source utilisée SANS casser
+    le flux (chaque chunk est re-yieldé immédiatement)."""
+    if request.method != "POST" or request.url.path not in ("/chat", "/chat/stream"):
+        return await call_next(request)
+    response = await call_next(request)
+    iterator = getattr(response, "body_iterator", None)
+    if iterator is None:
+        return response
+    buf = {"raw": ""}
+
+    async def _tap():
+        async for chunk in iterator:
+            try:
+                text = chunk.decode("utf-8", "replace") if isinstance(chunk, bytes) else str(chunk)
+            except Exception:
+                text = ""
+            buf["raw"] = (buf["raw"] + text)[-16384:]
+            yield chunk
+        try:
+            _fleet_audit_chat(request.url.path, buf["raw"])
+        except Exception:
+            pass
+
+    response.body_iterator = _tap()
+    return response
+
+
+# --- hook audit : chaque exécution d'outil (nom + succès) + alertes de niveau ---
+_orig_tool_execute = tools_registry.execute
+_SHELL_TOOLS = {"commande"}
+_WRITE_TOOLS = {"copier_fichier", "deplacer_fichier", "creer_dossier", "supprimer_fichier"}
+
+
+def _fleet_safe_roots() -> list:
+    return [
+        os.path.normpath(os.path.join(os.path.dirname(__file__), "..")),
+        os.path.expanduser("~"),
+        "/tmp",
+    ]
+
+
+def _fleet_outside_workspace(path) -> bool:
+    if not path or not isinstance(path, str):
+        return False
+    if not os.path.isabs(path):
+        return False  # chemin relatif → résolu dans le workspace courant
+    p = os.path.realpath(os.path.expanduser(path))
+    return not any(p == r or p.startswith(r + os.sep) for r in _fleet_safe_roots())
+
+
+async def _audited_tool_execute(name: str, params: dict) -> str:
+    result = await _orig_tool_execute(name, params)
+    try:
+        failed = isinstance(result, str) and (
+            result.startswith("Erreur lors de l'exécution")
+            or result.startswith("Outil «")
+        )
+        fleet.log_event(
+            {"event": "tool.execute", "tool": name, "success": not failed}, "info"
+        )
+        params = params or {}
+        if name in _SHELL_TOOLS:
+            await fleet.alert(
+                fleet.device_id(), "crit",
+                f"Exécution shell : {str(params.get('command') or '')[:160]}",
+            )
+        elif name in _WRITE_TOOLS:
+            for key in ("dst", "path", "src"):
+                if _fleet_outside_workspace(params.get(key)):
+                    await fleet.alert(
+                        fleet.device_id(), "warn",
+                        f"Écriture hors workspace : {str(params.get(key))[:200]}",
+                    )
+                    break
+    except Exception:
+        pass
+    return result
+
+
+tools_registry.execute = _audited_tool_execute
+
+
+# --- hook audit : téléchargement démarré (warn) — /downloads + skill ---
+_orig_dl_submit = downloads_store.submit_async
+
+
+async def _audited_dl_submit(**kw):
+    result = await _orig_dl_submit(**kw)
+    try:
+        if isinstance(result, dict) and result.get("ok"):
+            url = str(kw.get("url") or "")[:200]
+            fleet.log_event({"event": "download.start", "url": url}, "warn")
+            await fleet.alert(fleet.device_id(), "warn", f"Téléchargement lancé : {url}")
+    except Exception:
+        pass
+    return result
+
+
+downloads_store.submit_async = _audited_dl_submit
+
+
+@app.on_event("startup")
+async def _fleet_on_startup():
+    try:
+        fleet.start_background()
+    except Exception as e:
+        print(f"[fleet] background non démarré : {e}", flush=True)

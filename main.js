@@ -399,6 +399,27 @@ ipcMain.on('settings-updated', (event, config)=>{
   if(win && !win.isDestroyed()) win.webContents.send('settings-sync', config);
 });
 
+/* --- Fenêtre Console d'administration (Alex mère) --- */
+let consoleWin = null;
+ipcMain.on('open-console', ()=>{
+  if(consoleWin && !consoleWin.isDestroyed()){ consoleWin.focus(); return; }
+  const disp = screen.getPrimaryDisplay();
+  consoleWin = new BrowserWindow({
+    width: 1120, height: 740,
+    x: Math.round(disp.bounds.x + disp.bounds.width/2 - 560),
+    y: Math.round(disp.bounds.y + disp.bounds.height/2 - 370),
+    transparent: false,
+    frame: true,
+    resizable: true,
+    alwaysOnTop: false,
+    backgroundColor: '#0b0b12',
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
+  });
+  consoleWin.loadFile('console.html');
+  consoleWin.setMenuBarVisibility(false);
+  consoleWin.on('closed', ()=>{ consoleWin = null; });
+});
+
 /* ---------------------------------------------------------------------
    Cerveau Python (FastAPI/uvicorn) — démarré/arrêté avec l'app
 --------------------------------------------------------------------- */

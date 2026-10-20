@@ -7,3 +7,4 @@ pvrecorder>=1.2
 PyMuPDF>=1.23
 python-docx>=1.1
 Pillow>=10.0
+pynacl>=1.5
